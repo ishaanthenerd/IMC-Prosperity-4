@@ -1,0 +1,5 @@
+backtests/
+__pycache__/
+myenv/
+.python-version
+.DS_Store
