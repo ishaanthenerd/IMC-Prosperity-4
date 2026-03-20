@@ -342,6 +342,30 @@ class Product():
         raise NotImplementedError()
         ...
 
+class MeanRev(Product):
+    def __init__(self, product: str, limit: int, state: TradingState, z_th: float = 20, window: int = 10):
+        super().__init__(product, limit, state)
+        self.z_th = z_th
+        self.window = window
+        self.recent_mids = []
+    
+    def fair_val():
+        raise NotImplementedError()
+        ...
+    
+    def strategy(self):
+        self.recent_mids.append(self.mid_price())
+        if len(self.recent_mids) < self.window:
+            return
+        if len(self.recent_mids) > self.window:
+            self.recent_mids.pop(0)
+
+        z_score = (self.recent_mids[-1] - statistics.mean(self.recent_mids)) / statistics.stdev(self.recent_mids)
+        if z_score < -self.z_th:
+            self.full_buy(self.orderbook_buy_size())
+        elif z_score > self.z_th:
+            self.full_sell(self.orderbook_sell_size())
+
 '''
 PRODUCT CLASSES
 '''
@@ -396,7 +420,7 @@ class Tomato(Product):
             self.buy(buy_price, self.max_buy_orders())
             self.sell(sell_price, self.max_sell_orders())
             
-            # # don't trade opposite of our position side (risk aversion measure)
+            # # OLD - don't trade opposite of our position side (risk aversion measure)
             # if not (self.position > 0 and float(buy_price) >= fv):
             #     self.buy(buy_price, self.max_buy_orders())
             # if not (self.position < 0 and float(sell_price) <= fv):
@@ -428,7 +452,7 @@ class Trader:
             # reset ALL the states (can help if multiple product states are entangled)
             for product, instance in product_instances.items():
                 instance.reset_state(state)
-        
+
         # after ALL instantiating or resetting is done, then execute strategies
         for product, instance in product_instances.items():
             instance.strategy()
