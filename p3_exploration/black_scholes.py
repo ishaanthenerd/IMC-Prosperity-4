@@ -1,4 +1,4 @@
-from p3_exploration.datamodel import Listing, Observation, Order, OrderDepth, ProsperityEncoder, Symbol, Trade, TradingState, UserId
+from datamodel import Listing, Observation, Order, OrderDepth, ProsperityEncoder, Symbol, Trade, TradingState, UserId
 from typing import List, Any
 from collections import deque
 import string, json, math, statistics
@@ -11,7 +11,7 @@ from statistics import NormalDist
 class Logger:
     def __init__(self) -> None:
         self.logs = ""
-        self.max_log_length = 3750
+        self.max_log_length = 10000 # was 3750
 
     def print(self, *objects: Any, sep: str = " ", end: str = "\n") -> None:
         self.logs += sep.join(map(str, objects)) + end
@@ -500,7 +500,18 @@ class Option(Product):
         self.underlying_sold = 0
 
     def fair_val(self):
-        pass
+        if len(self.ivs.premiums) != self.ivs.window:
+            # when we can't trade, we are NOT bingqilin
+            logger.print("NOT bingqilin")
+            return
+        underlying_mid = self.underlying.fair_val()
+        avg_vol = self.ivs.mean()
+        std_vol = self.ivs.std()
+        if self.is_call:
+            cur_prices = [round(BlackScholes.black_scholes_call(underlying_mid, self.strike, self.tte, avg_vol + i * std_vol), 6) for i in range(-1, 2)]
+        else:
+            cur_prices = [round(BlackScholes.black_scholes_put(underlying_mid, self.strike, self.tte, avg_vol + i * std_vol), 6) for i in range(-1, 2)]
+        return cur_prices[1]
 
     def strategy(self):
         # add information to the RollingZ objects
@@ -512,13 +523,29 @@ class Option(Product):
         else:
             option_iv = BlackScholes.implied_volatility_put(cur_mid, underlying_mid, self.strike, self.tte)
             option_delta = BlackScholes.delta_put(underlying_mid, self.strike, self.tte, option_iv)
+        
+        # cap ivs getting added (there's something causing it to spike like CRAZY)
+        if option_iv > 0.99:
+            option_iv = self.ivs.mean() + 2 * self.ivs.std()
+        if option_iv < 0.01:
+            option_iv = self.ivs.mean() - 2 * self.ivs.std()
+
         self.underlying_prices.add(underlying_mid)
-        self.ivs.add(option_iv)
-        self.deltas.add(option_delta)
+        self.ivs.add(round(option_iv, 6))
+        self.deltas.add(round(option_delta, 6))
         if len(self.ivs.premiums) != self.ivs.window:
             # when we can't trade, we are NOT bingqilin
             logger.print("NOT bingqilin")
             return
+
+        # DEBUG - check for bad IVs
+        # # Define reasonable IV bounds
+        # MIN_IV = 0.0       # IV can't be negative
+        # MAX_IV = 0.5       # Adjust depending on market
+        # # Check the array
+        # bad_indices = np.where((self.ivs.premiums < MIN_IV) | (self.ivs.premiums > MAX_IV))[0]
+        # # Assert that there are no bad values
+        # assert len(bad_indices) == 0, f"Found {len(bad_indices)} invalid IVs at indices {bad_indices}, values: {self.ivs.premiums[bad_indices]}"
 
         # make prices; round to 6 places for readability
         avg_vol = self.ivs.mean()
@@ -534,11 +561,14 @@ class Option(Product):
         ask = int(math.ceil(fair_value - 0.01))
 
         # DEBUG
-        logger.print("market:", bid, "@", ask)
-        if not math.isnan(self.best_ask()) and self.best_ask() < bid:
-            logger.print("we're buying")
-        if not math.isnan(self.best_bid()) and ask < self.best_bid():
-            logger.print("we're selling")
+        logger.print("iv:", round(option_iv, 6))
+        logger.print("avg_iv:", round(avg_vol, 6))
+        logger.print("fair_value:", round(fair_value, 6))
+        # logger.print("market:", bid, "@", ask)
+        # if not math.isnan(self.best_ask()) and self.best_ask() < bid:
+        #     logger.print("we're buying")
+        # if not math.isnan(self.best_bid()) and ask < self.best_bid():
+        #     logger.print("we're selling")
 
         # if not volatile enough, just leave the market you CLOWN
         if (cur_prices[2] - cur_prices[0]) < 1.0:
@@ -552,7 +582,7 @@ class Option(Product):
             return
         bid_size = self.limit_buy_orders()
         ask_size = self.limit_sell_orders()
-        max_spread = math.floor(fair_value * 0.03)
+        max_spread = max(1, math.floor(fair_value * 0.03))
         old_position = self.active_position()
 
         # check if we are crossing markets with best_ask
@@ -659,11 +689,11 @@ class Trader:
 
             # PROSPERITY 3
             product_instances["VOLCANIC_ROCK"] = Rock("VOLCANIC_ROCK", 400, state)
-            product_instances["VOLCANIC_ROCK_VOUCHER_9500"]  = RockVoucher("VOLCANIC_ROCK_VOUCHER_9500",  200, state, True, 9500,  cur_tte, product_instances["VOLCANIC_ROCK"], 20, 1000, 20, 20, 20, 10)
-            product_instances["VOLCANIC_ROCK_VOUCHER_9750"]  = RockVoucher("VOLCANIC_ROCK_VOUCHER_9750",  200, state, True, 9750,  cur_tte, product_instances["VOLCANIC_ROCK"], 20, 1000, 20, 20, 20, 10)
-            product_instances["VOLCANIC_ROCK_VOUCHER_10000"] = RockVoucher("VOLCANIC_ROCK_VOUCHER_10000", 200, state, True, 10000, cur_tte, product_instances["VOLCANIC_ROCK"], 20, 1000, 20, 20, 20, 10)
-            product_instances["VOLCANIC_ROCK_VOUCHER_10250"] = RockVoucher("VOLCANIC_ROCK_VOUCHER_10250", 200, state, True, 10250, cur_tte, product_instances["VOLCANIC_ROCK"], 20, 1000, 20, 20, 20, 10)
-            product_instances["VOLCANIC_ROCK_VOUCHER_10500"] = RockVoucher("VOLCANIC_ROCK_VOUCHER_10500", 200, state, True, 10500, cur_tte, product_instances["VOLCANIC_ROCK"], 20, 1000, 20, 20, 20, 10)
+            product_instances["VOLCANIC_ROCK_VOUCHER_9500"]  = RockVoucher("VOLCANIC_ROCK_VOUCHER_9500",  80, state, True, 9500,  cur_tte, product_instances["VOLCANIC_ROCK"], 20, 1000, 20, 20, 20, 10)
+            product_instances["VOLCANIC_ROCK_VOUCHER_9750"]  = RockVoucher("VOLCANIC_ROCK_VOUCHER_9750",  80, state, True, 9750,  cur_tte, product_instances["VOLCANIC_ROCK"], 20, 1000, 20, 20, 20, 10)
+            product_instances["VOLCANIC_ROCK_VOUCHER_10000"] = RockVoucher("VOLCANIC_ROCK_VOUCHER_10000", 80, state, True, 10000, cur_tte, product_instances["VOLCANIC_ROCK"], 20, 1000, 20, 20, 20, 10)
+            product_instances["VOLCANIC_ROCK_VOUCHER_10250"] = RockVoucher("VOLCANIC_ROCK_VOUCHER_10250", 80, state, True, 10250, cur_tte, product_instances["VOLCANIC_ROCK"], 20, 1000, 20, 20, 20, 10)
+            product_instances["VOLCANIC_ROCK_VOUCHER_10500"] = RockVoucher("VOLCANIC_ROCK_VOUCHER_10500", 80, state, True, 10500, cur_tte, product_instances["VOLCANIC_ROCK"], 20, 1000, 20, 20, 20, 10)
             
             # turn on the trading unit; the products have been populated!
             Trader.turned_on = True
