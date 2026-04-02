@@ -407,10 +407,8 @@ class Emerald(Product):
         return 10000
     
     def strategy(self):
-        fv = self.fair_val()
-        th = 7
-        self.market_take(fv)
-        self.mm_undercut(fv, th)
+        self.market_take(self.fair_val())
+        self.mm_undercut(self.fair_val(), 7)
 
 class Tomato(Product):
     def __init__(self, symbol: str, limit: int, state: TradingState):
@@ -420,10 +418,8 @@ class Tomato(Product):
         return self.mid_price_using_best()
     
     def strategy(self):
-        fv = self.fair_val()
-        th = 5
-        self.market_take(fv)
-        self.mm_undercut_balanced(fv, th)
+        self.market_take(self.fair_val())
+        self.mm_undercut_balanced(self.fair_val(), 5)
 
 '''
 TRADING EXECUTION

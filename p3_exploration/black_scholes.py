@@ -617,14 +617,6 @@ class Option(Product):
                 # place bid at maximum dist from fair value
                 bid = int(math.floor(max(fair_value - max_spread, bid)))
         
-        # delta hedge - this only works for call options but that's fine for now
-        position_change = self.active_position() - old_position
-        avg_delta = self.deltas.mean()
-        if position_change > 0:
-            self.underlying.sell(self.underlying.mid_price_using_best(), int(ceil(position_change * avg_delta)))
-        elif position_change < 0:
-            self.underlying.buy(self.underlying.mid_price_using_best(), int(floor(-position_change * avg_delta)))
-
         # rebalance position
         bid_size = self.limit_buy_orders()
         ask_size = self.limit_sell_orders()
@@ -637,6 +629,19 @@ class Option(Product):
             self.buy(bid, bid_size)
             self.sell(ask, ask_size)
 
+        # delta hedge
+        position_change = self.active_position() - old_position
+        avg_delta = self.deltas.mean()
+        if self.is_call:
+            if position_change > 0:
+                self.underlying.sell(self.underlying.mid_price_using_best(), int(ceil(position_change * avg_delta)))
+            elif position_change < 0:
+                self.underlying.buy(self.underlying.mid_price_using_best(), int(floor(-position_change * avg_delta)))
+        else:
+            if position_change > 0:
+                self.underlying.buy(self.underlying.mid_price_using_best(), int(ceil(position_change * -avg_delta)))
+            elif position_change < 0:
+                self.underlying.sell(self.underlying.mid_price_using_best(), int(floor(-position_change * -avg_delta)))
 
 # END OF NEW CLASSES
 
@@ -655,7 +660,8 @@ class Rock(Product):
         return self.mid_price_using_best()
     
     def strategy(self):
-        pass
+        self.market_take(self.fair_val())
+        self.mm_undercut_balanced(self.fair_val(), 5)
 
 class RockVoucher(Option):
     def __init__(self, symbol, limit, state, is_call, strike, tte, underlying, underlying_z_th, underlying_window, iv_z_th, iv_window, delta_z_th, delta_window):
@@ -689,11 +695,11 @@ class Trader:
 
             # PROSPERITY 3
             product_instances["VOLCANIC_ROCK"] = Rock("VOLCANIC_ROCK", 400, state)
-            product_instances["VOLCANIC_ROCK_VOUCHER_9500"]  = RockVoucher("VOLCANIC_ROCK_VOUCHER_9500",  80, state, True, 9500,  cur_tte, product_instances["VOLCANIC_ROCK"], 20, 1000, 20, 20, 20, 10)
-            product_instances["VOLCANIC_ROCK_VOUCHER_9750"]  = RockVoucher("VOLCANIC_ROCK_VOUCHER_9750",  80, state, True, 9750,  cur_tte, product_instances["VOLCANIC_ROCK"], 20, 1000, 20, 20, 20, 10)
-            product_instances["VOLCANIC_ROCK_VOUCHER_10000"] = RockVoucher("VOLCANIC_ROCK_VOUCHER_10000", 80, state, True, 10000, cur_tte, product_instances["VOLCANIC_ROCK"], 20, 1000, 20, 20, 20, 10)
-            product_instances["VOLCANIC_ROCK_VOUCHER_10250"] = RockVoucher("VOLCANIC_ROCK_VOUCHER_10250", 80, state, True, 10250, cur_tte, product_instances["VOLCANIC_ROCK"], 20, 1000, 20, 20, 20, 10)
-            product_instances["VOLCANIC_ROCK_VOUCHER_10500"] = RockVoucher("VOLCANIC_ROCK_VOUCHER_10500", 80, state, True, 10500, cur_tte, product_instances["VOLCANIC_ROCK"], 20, 1000, 20, 20, 20, 10)
+            product_instances["VOLCANIC_ROCK_VOUCHER_9500"]  = RockVoucher("VOLCANIC_ROCK_VOUCHER_9500",  200, state, True, 9500,  cur_tte, product_instances["VOLCANIC_ROCK"], 20, 1000, 20, 20, 20, 10)
+            product_instances["VOLCANIC_ROCK_VOUCHER_9750"]  = RockVoucher("VOLCANIC_ROCK_VOUCHER_9750",  200, state, True, 9750,  cur_tte, product_instances["VOLCANIC_ROCK"], 20, 1000, 20, 20, 20, 10)
+            product_instances["VOLCANIC_ROCK_VOUCHER_10000"] = RockVoucher("VOLCANIC_ROCK_VOUCHER_10000", 200, state, True, 10000, cur_tte, product_instances["VOLCANIC_ROCK"], 20, 1000, 20, 20, 20, 10)
+            product_instances["VOLCANIC_ROCK_VOUCHER_10250"] = RockVoucher("VOLCANIC_ROCK_VOUCHER_10250", 200, state, True, 10250, cur_tte, product_instances["VOLCANIC_ROCK"], 20, 1000, 20, 20, 20, 10)
+            product_instances["VOLCANIC_ROCK_VOUCHER_10500"] = RockVoucher("VOLCANIC_ROCK_VOUCHER_10500", 200, state, True, 10500, cur_tte, product_instances["VOLCANIC_ROCK"], 20, 1000, 20, 20, 20, 10)
             
             # turn on the trading unit; the products have been populated!
             Trader.turned_on = True
