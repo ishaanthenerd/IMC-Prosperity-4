@@ -1,0 +1,297 @@
+'''
+mmm... chrispy code...
+'''
+
+def initialize_round_3(self):
+    # init call but for round 3
+
+    self.options_model = BlackScholes()
+
+    self.timestamps_per_year = 365e6
+    self.days_left = 4 # day 2: 6, day 3 (submission) : 5
+
+    # fit params genrated by fit between -0.35 and 0.35 moneyness
+    self.ask_params = {
+                        'a': 0.2386154106662951,
+                        'b': -0.001961415956883628,  
+                        'c': 0.15164395927568022
+                        }
+    
+    self.bid_params = {
+                        'a': 0.1436195242784995,
+                        'b': -0.0015495217059325098,
+                        'c': 0.15037740474609734
+                        }
+    
+
+    self.vouchers =  ['VOLCANIC_ROCK_VOUCHER_9500', 'VOLCANIC_ROCK_VOUCHER_9750',
+                        'VOLCANIC_ROCK_VOUCHER_10000', 'VOLCANIC_ROCK_VOUCHER_10250',
+                        'VOLCANIC_ROCK_VOUCHER_10500']
+
+    # self.vouchers = ['VOLCANIC_ROCK_VOUCHER_10000']
+
+    # windows n shit
+    self.underlying_price_history = []
+    self.underlying_spread = 0
+    self.underlying_price_window = 5
+
+    self.window_size = 20
+    self.total_trades = 0
+    self.total_takes = 0
+    self.total_hedges = 0
+    self.total_exits = 0
+
+    self.voucher_implied_vols = {
+        'VOLCANIC_ROCK_VOUCHER_9500' :  [],
+        'VOLCANIC_ROCK_VOUCHER_9750' :  [],
+        'VOLCANIC_ROCK_VOUCHER_10000' : [],
+        'VOLCANIC_ROCK_VOUCHER_10250' : [],
+        'VOLCANIC_ROCK_VOUCHER_10500' : []
+    }
+
+    self.voucher_deltas = {
+        'VOLCANIC_ROCK_VOUCHER_9500' :  [],
+        'VOLCANIC_ROCK_VOUCHER_9750' :  [],
+        'VOLCANIC_ROCK_VOUCHER_10000' : [],
+        'VOLCANIC_ROCK_VOUCHER_10250' : [],
+        'VOLCANIC_ROCK_VOUCHER_10500' : []   
+    }
+
+
+def update_round_4_products(self, state):
+    # vouchers = [self.trading_voucher]
+    underlying = 'VOLCANIC_ROCK'
+
+    order_book = state.order_depths[underlying]
+    if len(order_book.sell_orders) != 0 and len(order_book.buy_orders) != 0:
+        ask, _ = list(order_book.sell_orders.items())[0] 
+        bid, _ = list(order_book.buy_orders.items())[0]         
+
+        underlying_price = (ask + bid) / 2
+        self.underlying_spread = (bid-ask)
+        self.underlying_price_history.append(underlying_price)
+        self.underlying_price_history = self.underlying_price_history[-self.squid_ink_long_window:]
+
+    for voucher in self.vouchers:
+        order_book = state.order_depths[voucher]
+        if len(order_book.sell_orders) == 0 or len(order_book.buy_orders) == 0 or len(self.underlying_price_history) == 0:
+            continue
+
+        ask, _ = list(order_book.sell_orders.items())[0]
+        bid, _ = list(order_book.buy_orders.items())[0]
+            
+        mid_price = (ask + bid) / 2
+        underlying_price = self.underlying_price_history[-1]
+        strike = int(voucher.split('_')[-1])
+        tte = (self.days_left / 365)  - state.timestamp / self.timestamps_per_year
+
+        voucher_iv = self.options_model.implied_volatility(mid_price, underlying_price, strike, tte)
+        # logger.print(f"{strike} - {mid_price} - {underlying_price} - {tte} => {voucher_iv}")
+        voucher_delta = self.options_model.delta(underlying_price, strike, tte, voucher_iv)
+
+        # append vol
+        self.voucher_implied_vols[voucher].append(voucher_iv)
+        self.voucher_implied_vols[voucher] = self.voucher_implied_vols[voucher][-self.window_size:]
+
+        # append deltas
+        self.voucher_deltas[voucher].append(voucher_delta)
+        self.voucher_deltas[voucher] = self.voucher_deltas[voucher][-self.window_size:]
+
+def buy_voucher(self, state, voucher):
+
+    pos_size = self.get_product_pos(state, voucher)
+    
+    if pos_size >= 0:
+        return
+
+    voucher_avg_vol = np.mean(self.voucher_implied_vols[voucher])
+    strike = int(voucher.split('_')[-1])
+    underlying_price = self.underlying_price_history[-1]
+    tte = (self.days_left / 365)  - state.timestamp / self.timestamps_per_year        
+
+    fair_value = self.options_model.black_scholes_call(underlying_price, strike, tte, voucher_avg_vol)
+    
+    # since we are buying, round mid_price up
+    price = int(math.ceil(fair_value))
+    self.entry_price = price
+    size = abs(pos_size)
+    self.send_buy_order(voucher, price, size)
+
+def sell_voucher(self, state, voucher):
+    pos_size = self.get_product_pos(state, voucher)
+    
+    if pos_size <= 0:
+        return 
+    
+    voucher_avg_vol = np.mean(self.voucher_implied_vols[voucher])
+    strike = int(voucher.split('_')[-1])
+    underlying_price = self.underlying_price_history[-1]
+    tte = (self.days_left / 365)  - state.timestamp / self.timestamps_per_year        
+
+    fair_value = self.options_model.black_scholes_call(underlying_price, strike, tte, voucher_avg_vol)
+    
+    price = int(math.floor(fair_value))
+    size = abs(pos_size)
+    self.send_sell_order(voucher, price, -size)
+
+def mm_on_IV(self, state): 
+    for voucher in self.vouchers:  
+        voucher_avg_vol = np.mean(self.voucher_implied_vols[voucher])
+        voucher_std_vol = np.std(self.voucher_implied_vols[voucher])
+    
+        strike = int(voucher.split('_')[-1])
+        underlying_price = self.underlying_price_history[-1]
+        tte = (self.days_left / 365)  - state.timestamp / self.timestamps_per_year
+
+        high_value = self.options_model.black_scholes_call(underlying_price, strike, tte, voucher_avg_vol + voucher_std_vol)
+        fair_value = self.options_model.black_scholes_call(underlying_price, strike, tte, voucher_avg_vol)
+        low_value = self.options_model.black_scholes_call(underlying_price, strike, tte, voucher_avg_vol - voucher_std_vol)
+        
+        # dont trade it if it's not volatile enough
+        if (high_value - low_value) < 1.0:
+            self.buy_voucher(state, voucher)
+            self.sell_voucher(state, voucher)
+            continue
+
+        eps = 0.1
+        bid = int(math.floor(fair_value+eps))
+        ask = int(math.ceil(fair_value-eps))
+
+        # =========== MM Approach ==========
+        max_size = 200
+        bid_size = max_size - self.get_product_pos(state, voucher)
+        ask_size = self.get_product_pos(state, voucher) + max_size
+
+        # check for other person's market
+        order_depth = state.order_depths[voucher]
+        
+        best_ask = None
+        best_ask_amount = None
+
+        best_bid = None
+        best_bid_amount = None
+
+        if len(order_depth.sell_orders) != 0:
+            best_ask, _ = list(order_depth.sell_orders.items())[-1]
+        
+        if len(order_depth.buy_orders) != 0:
+            best_bid, _ = list(order_depth.buy_orders.items())[-1]
+
+        sent_buys = 0
+        sent_sells = 0
+
+        fair_value = int(fair_value)
+        max_spread = math.floor(fair_value * 0.03)
+
+        # check if we are crossing markets with best_ask
+        for market_ask, market_amount in order_depth.sell_orders.items():
+            if bid > market_ask:
+                # eat their market then take it over
+                eat_order_size = abs(min(bid_size, abs(market_amount)))
+                self.send_buy_order(voucher, market_ask, eat_order_size) # take their ask
+                sent_buys += eat_order_size
+                    
+                # place bid above best bid
+                if best_bid is not None:
+                    bid = best_bid + 1
+                else:
+                    bid = int(math.floor(fair_value - max_spread))
+
+                # place ask at maximum dist from fair value
+                ask = int(math.ceil(max(fair_value + max_spread, ask)))
+                                
+        # check if we are crossing with best_bid
+        for market_bid, market_amount in order_depth.buy_orders.items():
+            if ask < market_bid:
+                # eat their market then take it over
+                eat_order_size = abs(min(ask_size, abs(market_amount)))
+                sent_sells += eat_order_size
+                self.send_sell_order(voucher, best_bid, -eat_order_size)
+                
+                # place ask below best ask
+                if best_ask is not None: 
+                    ask = best_ask - 1
+                else:
+                    ask = int(math.ceil(ask + max_spread))
+                
+                # place bid at maximum dist from fair value
+                bid = int(math.floor(max(fair_value - max_spread, bid)))
+
+
+        # logger.print(f"strike {strike} price: {fair_value:.1f} market: ({bid}|{ask}) taken: ({sent_buys}|{sent_sells})")
+
+        # recalculate max sizings
+        bid_size = max(max_size - self.get_product_pos(state, voucher) - sent_buys, 0)
+        ask_size = max(self.get_product_pos(state, voucher) + max_size - sent_sells, 0)
+
+        if sent_buys > 0:
+            bought_delta = np.mean(self.voucher_deltas[voucher]) * sent_buys
+            self.trade_underlying(state, -int(bought_delta))
+        
+        if sent_sells > 0:
+            sold_delta = np.mean(self.voucher_deltas[voucher]) * sent_sells
+            self.trade_underlying(state, int(sold_delta))
+
+        if bid == ask:
+            if bid_size > ask_size:
+                self.send_buy_order(voucher, bid, bid_size)
+            elif ask_size < bid_size:
+                self.send_sell_order(voucher, ask, -ask_size)   
+        else:
+            self.send_buy_order(voucher, bid, bid_size)      
+            self.send_sell_order(voucher, ask, -ask_size)   
+
+def trade_underlying(self, state, size, dont_hedge=True):
+    
+    if dont_hedge:
+        return
+    
+    if self.underlying_spread > 1:
+        return
+                
+    if size < 0:
+        # need to buy
+        mid_price = self.underlying_price_history[-1]
+        price = int(math.ceil(mid_price))
+        size = abs(size)
+        cur_pos = self.get_product_pos(state, 'VOLCANIC_ROCK')
+        size = min(400-cur_pos-self.volcanic_rock_buy_orders, size)
+        self.volcanic_rock_buy_orders += size
+        self.send_buy_order('VOLCANIC_ROCK', price, size)
+        
+    elif size > 0:
+        # need to sell
+        mid_price = self.underlying_price_history[-1]
+        price = int(math.floor(mid_price))
+        size = abs(size)
+        cur_pos = self.get_product_pos(state, 'VOLCANIC_ROCK')
+        size = min(cur_pos + 400 - self.volcanic_rock_sell_orders, size)
+        self.volcanic_rock_sell_orders += size
+        self.send_buy_order('VOLCANIC_ROCK', price, -size)
+
+def delta_hedge(self, state):
+    # need to calcualte total delta
+    total_delta = 0
+    for voucher in self.vouchers:
+        
+        if len(self.voucher_deltas[voucher]) == 0:
+            continue
+        
+        delta = np.mean(self.voucher_deltas[voucher]) # take last delta
+
+        position_size = self.get_product_pos(state, voucher) # get position size 
+        total_delta += delta * position_size
+    
+    # logger.print(f"Total Delta: {total_delta:.2f}, Volcanic Rock: {self.get_product_pos(state, 'VOLCANIC_ROCK'):.2f}")
+    size = int(self.get_product_pos(state, 'VOLCANIC_ROCK') + self.volcanic_rock_buy_orders - self.volcanic_rock_sell_orders + total_delta)
+
+    self.trade_underlying(state, size)   
+
+def trade_vouchers(self, state):
+
+    self.update_round_4_products(state)
+
+    self.mm_on_IV(state)
+
+    # hedge after trading
+    self.delta_hedge(state)

@@ -226,8 +226,6 @@ class Product():
             return math.nan
 
     # calculate mid prices using best / worst (there are reasons to use one over the other!)
-    def mid_price(self):
-        return self.mid_price_using_worst() # default is use worst
     def mid_price_using_best(self):
         return (self.best_bid() + self.best_ask()) / 2
     def mid_price_using_worst(self):
@@ -319,11 +317,11 @@ class Product():
         buy_price: int,
         sell_price: int
     ):
-        self.buy(buy_price, self.limit_buy_orders())
-        self.sell(sell_price, self.limit_sell_orders())
+        self.buy(buy_price, self.max_buy_orders())
+        self.sell(sell_price, self.max_sell_orders())
     
     # market-making under the condition of starting at [fv - edge, fv + edge] and expanding outwards
-    def market_make_undercut(
+    def mm_undercut(
         self,
         fair_val: int,
         edge: float = 0,
@@ -331,6 +329,19 @@ class Product():
         mm_buy = max([bid for bid in self.order_depth.buy_orders.keys() if bid < fair_val - edge], default=fair_val - edge - 1) + 1
         mm_sell = min([ask for ask in self.order_depth.sell_orders.keys() if ask > fair_val + edge], default=fair_val + edge + 1) - 1
         self.market_make(mm_buy, mm_sell)
+
+    # same as mm_undercut but also try to move position towards zero if position != 0
+    def mm_undercut_balanced(
+        self,
+        fair_val: int,
+        edge: float = 0,
+    ):
+        mm_buy = max([bid for bid in self.order_depth.buy_orders.keys() if bid < fair_val - edge], default = fair_val - edge - 1) + 1
+        mm_sell = min([ask for ask in self.order_depth.sell_orders.keys() if ask > fair_val + edge], default = fair_val + edge + 1) - 1
+        if not (self.active_position() > 0 and mm_buy >= self.best_bid()):
+            self.buy(mm_buy, self.max_buy_orders())
+        if not (self.active_position() < 0 and mm_sell <= self.best_ask()):
+            self.sell(mm_sell, self.max_sell_orders())
     
     '''
     SECTION 4 - Non-Implemented Strategies (runtime polymorphism)
@@ -351,9 +362,11 @@ class RollingZ():
         self.fixed_mean = fixed_mean
 
     def add(self, new_val: float):
-        np.append(self.premiums, new_val)
+        self.premiums = np.append(self.premiums, new_val)
         if len(self.premiums) > self.window:
-            np.delete(self.premiums, 0)
+            self.premiums = np.delete(self.premiums, 0)
+            assert(len(self.premiums) == self.window)
+        assert(len(self.premiums) != 0)
 
     def mean(self):
         return self.fixed_mean if not math.isnan(self.fixed_mean) else np.mean(self.premiums)
@@ -366,6 +379,9 @@ class RollingZ():
 
     # 1 means buy, 0 means do nothing, -1 means sell (sign indicates position direction)
     def signal(self):
+        if np.std(self.premiums) == 0 or len(self.premiums) != self.window:
+            return 0
+        
         z_score = 0
         if math.isnan(self.fixed_mean):
             z_score = (self.premiums[-1] - np.mean(self.premiums)) / np.std(self.premiums)
@@ -378,6 +394,7 @@ class RollingZ():
             return -1
         else:
             return 0
+
 '''
 PRODUCT CLASSES
 '''
@@ -391,44 +408,22 @@ class Emerald(Product):
     
     def strategy(self):
         fv = self.fair_val()
+        th = 7
         self.market_take(fv)
-        self.market_make_undercut(fv, 7)
+        self.mm_undercut(fv, th)
 
 class Tomato(Product):
     def __init__(self, symbol: str, limit: int, state: TradingState):
         super().__init__(symbol, limit, state)
 
     def fair_val(self):
-        return self.mid_price()
+        return self.mid_price_using_best()
     
     def strategy(self):
         fv = self.fair_val()
+        th = 5
         self.market_take(fv)
-        self.market_make_undercut(fv, 5)
-
-        '''
-        fv = self.fair_val()
-        th = 5 # experiment!
-        buy_orders = self.order_depth.buy_orders
-        sell_orders = self.order_depth.sell_orders
-
-        if len(sell_orders) != 0 and len(buy_orders) != 0:
-            # initial market
-            buy_price = fv - th
-            sell_price = fv + th
-
-            # someone else's market is wider - copy them!
-            if not math.isnan(self.best_bid()):
-                buy_price = min(buy_price, self.best_bid())
-            if not math.isnan(self.best_ask()):
-                sell_price = max(sell_price, self.best_ask())
-
-            # don't trade opposite of our position side (risk aversion measure)
-            if not (self.position > 0 and float(buy_price) >= fv):
-                self.buy(buy_price, self.max_buy_orders())
-            if not (self.position < 0 and float(sell_price) <= fv):
-                self.sell(sell_price, self.max_sell_orders())
-        '''
+        self.mm_undercut_balanced(fv, th)
 
 '''
 TRADING EXECUTION

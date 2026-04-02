@@ -1,4 +1,4 @@
-from datamodel import Listing, Observation, Order, OrderDepth, ProsperityEncoder, Symbol, Trade, TradingState, UserId
+from p3_exploration.datamodel import Listing, Observation, Order, OrderDepth, ProsperityEncoder, Symbol, Trade, TradingState, UserId
 from typing import List, Any
 from collections import deque
 import string, json, math, statistics
@@ -230,8 +230,6 @@ class Product():
             return math.nan
 
     # calculate mid prices using best / worst (there are reasons to use one over the other!)
-    def mid_price(self):
-        return self.mid_price_using_worst() # default is use worst
     def mid_price_using_best(self):
         return (self.best_bid() + self.best_ask()) / 2
     def mid_price_using_worst(self):
@@ -323,11 +321,11 @@ class Product():
         buy_price: int,
         sell_price: int
     ):
-        self.buy(buy_price, self.limit_buy_orders())
-        self.sell(sell_price, self.limit_sell_orders())
+        self.buy(buy_price, self.max_buy_orders())
+        self.sell(sell_price, self.max_sell_orders())
     
     # market-making under the condition of starting at [fv - edge, fv + edge] and expanding outwards
-    def market_make_undercut(
+    def mm_undercut(
         self,
         fair_val: int,
         edge: float = 0,
@@ -335,6 +333,19 @@ class Product():
         mm_buy = max([bid for bid in self.order_depth.buy_orders.keys() if bid < fair_val - edge], default=fair_val - edge - 1) + 1
         mm_sell = min([ask for ask in self.order_depth.sell_orders.keys() if ask > fair_val + edge], default=fair_val + edge + 1) - 1
         self.market_make(mm_buy, mm_sell)
+
+    # same as mm_undercut but also try to move position towards zero if position != 0
+    def mm_undercut_balanced(
+        self,
+        fair_val: int,
+        edge: float = 0,
+    ):
+        mm_buy = max([bid for bid in self.order_depth.buy_orders.keys() if bid < fair_val - edge], default = fair_val - edge - 1) + 1
+        mm_sell = min([ask for ask in self.order_depth.sell_orders.keys() if ask > fair_val + edge], default = fair_val + edge + 1) - 1
+        if not (self.active_position() > 0 and mm_buy >= self.best_bid()):
+            self.buy(mm_buy, self.max_buy_orders())
+        if not (self.active_position() < 0 and mm_sell <= self.best_ask()):
+            self.sell(mm_sell, self.max_sell_orders())
     
     '''
     SECTION 4 - Non-Implemented Strategies (runtime polymorphism)
@@ -357,7 +368,8 @@ class RollingZ():
     def add(self, new_val: float):
         self.premiums = np.append(self.premiums, new_val)
         if len(self.premiums) > self.window:
-            np.delete(self.premiums, 0)
+            self.premiums = np.delete(self.premiums, 0)
+            assert(len(self.premiums) == self.window)
         assert(len(self.premiums) != 0)
 
     def mean(self):
@@ -371,6 +383,9 @@ class RollingZ():
 
     # 1 means buy, 0 means do nothing, -1 means sell (sign indicates position direction)
     def signal(self):
+        if np.std(self.premiums) == 0 or len(self.premiums) != self.window:
+            return 0
+        
         z_score = 0
         if math.isnan(self.fixed_mean):
             z_score = (self.premiums[-1] - np.mean(self.premiums)) / np.std(self.premiums)
@@ -480,145 +495,118 @@ class Option(Product):
         self.deltas = RollingZ(delta_z_th, delta_window)
     
     def update_tte(self, new_tte: float):
-        self.time_to_expiry = new_tte
+        self.tte = new_tte
         self.underlying_bought = 0
         self.underlying_sold = 0
 
-    # FLIP THIS IF NEEDED!!
-    def will_delta_hedge(self):
-        return True
-
     def fair_val(self):
-        spot = self.underlying_prices.most_recent()
-        avg_iv = self.ivs.mean()
-        if self.is_call:
-            return BlackScholes.black_scholes_call(spot, self.strike, self.tte, avg_iv)
-        else:
-            return BlackScholes.black_scholes_put(spot, self.strike, self.tte, avg_iv)
-    
+        pass
+
     def strategy(self):
-        # add data to three RollingZ classes
-        self.underlying_prices.add(self.underlying.mid_price())
-        cur_mid = self.mid_price()
+        # add information to the RollingZ objects
+        underlying_mid = self.underlying.fair_val()
+        cur_mid = self.mid_price_using_best()
         if self.is_call:
-            iv = BlackScholes.implied_volatility_call(cur_mid, self.underlying_prices.most_recent(), self.strike, self.tte)
-            delta = BlackScholes.delta_call(self.underlying_prices.most_recent(), self.strike, self.tte, iv)
+            option_iv = BlackScholes.implied_volatility_call(cur_mid, underlying_mid, self.strike, self.tte)
+            option_delta = BlackScholes.delta_call(underlying_mid, self.strike, self.tte, option_iv)
         else:
-            iv = BlackScholes.implied_volatility_put(cur_mid, self.underlying_prices.most_recent(), self.strike, self.tte)
-            delta = BlackScholes.delta_put(self.underlying_prices.most_recent(), self.strike, self.tte, iv)
-        self.ivs.add(iv)
-        self.deltas.add(delta)
+            option_iv = BlackScholes.implied_volatility_put(cur_mid, underlying_mid, self.strike, self.tte)
+            option_delta = BlackScholes.delta_put(underlying_mid, self.strike, self.tte, option_iv)
+        self.underlying_prices.add(underlying_mid)
+        self.ivs.add(option_iv)
+        self.deltas.add(option_delta)
+        if len(self.ivs.premiums) != self.ivs.window:
+            # when we can't trade, we are NOT bingqilin
+            logger.print("NOT bingqilin")
+            return
 
-        # compute the fair value
-        true_value = self.fair_val()
-        spot = self.underlying_prices.most_recent()
-        avg_iv = self.ivs.mean()
-        std_iv = self.ivs.std()
+        # make prices; round to 6 places for readability
+        avg_vol = self.ivs.mean()
+        std_vol = self.ivs.std()
         if self.is_call:
-            low_value = BlackScholes.black_scholes_call(spot, self.strike, self.tte, avg_iv - std_iv)
-            high_value = BlackScholes.black_scholes_call(spot, self.strike, self.tte, avg_iv + std_iv)
+            cur_prices = [round(BlackScholes.black_scholes_call(underlying_mid, self.strike, self.tte, avg_vol + i * std_vol), 6) for i in range(-1, 2)]
         else:
-            low_value = BlackScholes.black_scholes_put(spot, self.strike, self.tte, avg_iv - std_iv)
-            high_value = BlackScholes.black_scholes_put(spot, self.strike, self.tte, avg_iv + std_iv)
+            cur_prices = [round(BlackScholes.black_scholes_put(underlying_mid, self.strike, self.tte, avg_vol + i * std_vol), 6) for i in range(-1, 2)]
         
-        # if not volatile enough, just rebalance position
-        if (high_value - low_value) < 1.0:
-            if self.active_position() < 0:
-                self.buy(self.fair_val(), -self.active_position())
-            elif self.active_position() > 0:
-                self.sell(self.fair_val(), self.active_position())
+        # market make on it
+        fair_value = cur_prices[1]
+        bid = int(math.floor(fair_value + 0.01))
+        ask = int(math.ceil(fair_value - 0.01))
 
-        # now make our market
-        eps = 0.1
-        bid_val = int(floor(true_value + eps))
-        ask_val = int(ceil(true_value - eps))
+        # DEBUG
+        logger.print("market:", bid, "@", ask)
+        if not math.isnan(self.best_ask()) and self.best_ask() < bid:
+            logger.print("we're buying")
+        if not math.isnan(self.best_bid()) and ask < self.best_bid():
+            logger.print("we're selling")
 
-        # market make BUT keep track of sizings
-        bid_size = self.limit - self.active_position()
-        ask_size = self.limit + self.active_position()
-
-        total_bought = 0
-        total_sold = 0
-        true_value = int(true_value)
-        max_spread = floor(true_value * 0.03)
-
-        # crossing with best bid
-        for market_bid, market_amount in self.order_depth.buy_orders.items():
-            if ask_val < market_bid:
-                # eat their market then take it over
-                eat_order_size = abs(min(ask_size, abs(market_amount)))
-                total_sold += eat_order_size
-                self.sell(self.best_bid(), eat_order_size)
-                
-                # place ask below best ask
-                if not math.isnan(self.best_ask()): 
-                    ask_val = self.best_ask() - 1
-                else:
-                    ask_val = int(math.ceil(ask_val + max_spread))
-                
-                # place bid at maximum dist from fair value
-                bid_val = int(math.floor(max(true_value - max_spread, bid_val)))
+        # if not volatile enough, just leave the market you CLOWN
+        if (cur_prices[2] - cur_prices[0]) < 1.0:
+            return
         
-        # crossing with best ask
+        # keep track of information
+        best_bid = self.best_bid()
+        best_ask = self.best_ask()
+        if math.isnan(best_bid) or math.isnan(best_ask):
+            logger.print("missing best bid/ask")
+            return
+        bid_size = self.limit_buy_orders()
+        ask_size = self.limit_sell_orders()
+        max_spread = math.floor(fair_value * 0.03)
+        old_position = self.active_position()
+
+        # check if we are crossing markets with best_ask
         for market_ask, market_amount in self.order_depth.sell_orders.items():
-            if bid_val > market_ask:
+            if bid > market_ask:
                 # eat their market then take it over
                 eat_order_size = abs(min(bid_size, abs(market_amount)))
                 self.buy(market_ask, eat_order_size)
-                total_bought += eat_order_size
                     
                 # place bid above best bid
-                if not math.isnan(self.best_bid()):
-                    bid_val = self.best_bid() + 1
+                if best_bid is not None:
+                    bid = best_bid + 1
                 else:
-                    bid_val = int(math.floor(true_value - max_spread))
+                    bid = int(math.floor(fair_value - max_spread))
 
                 # place ask at maximum dist from fair value
-                ask_val = int(math.ceil(max(true_value + max_spread, ask_val)))
+                ask = int(math.ceil(max(fair_value + max_spread, ask)))
+                                
+        # check if we are crossing with best_bid
+        for market_bid, market_amount in self.order_depth.buy_orders.items():
+            if ask < market_bid:
+                # eat their market then take it over
+                eat_order_size = abs(min(ask_size, abs(market_amount)))
+                self.sell(market_bid, eat_order_size)
+                
+                # place ask below best ask
+                if best_ask is not None: 
+                    ask = best_ask - 1
+                else:
+                    ask = int(math.ceil(ask + max_spread))
+                
+                # place bid at maximum dist from fair value
+                bid = int(math.floor(max(fair_value - max_spread, bid)))
+        
+        # delta hedge - this only works for call options but that's fine for now
+        position_change = self.active_position() - old_position
+        avg_delta = self.deltas.mean()
+        if position_change > 0:
+            self.underlying.sell(self.underlying.mid_price_using_best(), int(ceil(position_change * avg_delta)))
+        elif position_change < 0:
+            self.underlying.buy(self.underlying.mid_price_using_best(), int(floor(-position_change * avg_delta)))
 
-        if self.will_delta_hedge():
-            # calculate the amount of delta bought and sold, then rebalance delta
-            if total_bought > 0:
-                bought_delta = self.deltas.mean() * total_bought
-                self.sell_underlying(int(bought_delta))
-            if total_sold > 0:
-                sold_delta = self.deltas.mean() * total_sold
-                self.buy_underlying(int(sold_delta))
-
-        # market make to balance position on options back to zero
-        bid_size = max(self.limit - self.active_position() - total_bought, 0)
-        ask_size = max(self.active_position() + self.limit - total_sold, 0)
-
-        if bid_val == ask_val:
-            if self.max_buy_orders() > self.max_sell_orders():
-                self.buy(bid_val, bid_size)
-            elif self.max_sell_orders() > self.max_buy_orders():
-                self.sell(ask_val, ask_size)
+        # rebalance position
+        bid_size = self.limit_buy_orders()
+        ask_size = self.limit_sell_orders()
+        if bid == ask:
+            if bid_size > ask_size:
+                self.buy(bid, bid_size)
+            elif ask_size > bid_size:
+                self.sell(ask, ask_size)
         else:
-            self.buy(bid_val, bid_size)
-            self.sell(ask_val, ask_size)
+            self.buy(bid, bid_size)
+            self.sell(ask, ask_size)
 
-    def buy_underlying(self, quantity):
-        try:
-            underlying_value = self.underlying_prices.most_recent()
-            underlying_value = int(ceil(underlying_value))
-            cur_pos = self.underlying.active_position()
-            trade_size = min(self.underlying.limit - cur_pos - self.underlying_bought, quantity)
-            self.underlying_bought += trade_size
-            self.underlying.buy(underlying_value, trade_size)
-        except:
-            return
-
-    def sell_underlying(self, quantity):
-        try:
-            underlying_value = self.underlying_prices.most_recent()
-            underlying_value = int(floor(underlying_value))
-            cur_pos = self.underlying.active_position()
-            trade_size = min(self.underlying.limit + cur_pos - self.underlying_sold, quantity)
-            self.underlying_sold += trade_size
-            self.underlying.sell(underlying_value, trade_size)
-        except:
-            pass
 
 # END OF NEW CLASSES
 
@@ -634,11 +622,10 @@ class Rock(Product):
         super().__init__(product, limit, state)
     
     def fair_val(self):
-        return self.mid_price()
+        return self.mid_price_using_best()
     
     def strategy(self):
         pass
-        # self.market_take(self.fair_val(), 0.5)
 
 class RockVoucher(Option):
     def __init__(self, symbol, limit, state, is_call, strike, tte, underlying, underlying_z_th, underlying_window, iv_z_th, iv_window, delta_z_th, delta_window):
@@ -649,53 +636,6 @@ class RockVoucher(Option):
     
     def strategy(self):
         super().strategy()
-
-# PROSPERITY 4
-
-'''
-class Emerald(Product):
-    def __init__(self, symbol: str, limit: int, state: TradingState):
-        super().__init__(symbol, limit, state)
-
-    def fair_val(self):
-        return 10000
-    
-    def strategy(self):
-        fv = self.fair_val()
-        th = 1 # tighest market possible
-        self.market_take(fv, th)
-        self.market_make_undercut(fv, th)
-
-class Tomato(Product):
-    def __init__(self, symbol: str, limit: int, state: TradingState):
-        super().__init__(symbol, limit, state)
-
-    def fair_val(self):
-        return self.mid_price()
-    
-    def strategy(self):
-        fv = self.fair_val()
-        th = 5 # experiment!
-        buy_orders = self.order_depth.buy_orders
-        sell_orders = self.order_depth.sell_orders
-
-        if len(sell_orders) != 0 and len(buy_orders) != 0:
-            # initial market
-            buy_price = fv - th
-            sell_price = fv + th
-
-            # someone else's market is wider - copy them!
-            if not math.isnan(self.best_bid()):
-                buy_price = min(buy_price, self.best_bid())
-            if not math.isnan(self.best_ask()):
-                sell_price = max(sell_price, self.best_ask())
-
-            # don't trade opposite of our position side (risk aversion measure)
-            if not (self.position > 0 and float(buy_price) >= fv):
-                self.buy(buy_price, self.max_buy_orders())
-            if not (self.position < 0 and float(sell_price) <= fv):
-                self.sell(sell_price, self.max_sell_orders())
-'''
 
 '''
 TRADING EXECUTION
@@ -711,25 +651,19 @@ class Trader:
     def run(self, state: TradingState):
         result = {}
         traderData = ""
-        days_left = 5
-        cur_tte = (days_left / 365) - (state.timestamp / 365e6)
+        cur_day = 1
+        cur_tte = ((8 - cur_day) / 365) - (state.timestamp / 365e6)
 
         if not Trader.turned_on:
             # initiate the products / arbitrages
 
             # PROSPERITY 3
             product_instances["VOLCANIC_ROCK"] = Rock("VOLCANIC_ROCK", 400, state)
-            product_instances["VOLCANIC_ROCK_VOUCHER_9500"] = RockVoucher("VOLCANIC_ROCK_VOUCHER_9500", 200, state, True, 9500, cur_tte, product_instances["VOLCANIC_ROCK"], 20, 10, 20, 10, 20, 10)
-            product_instances["VOLCANIC_ROCK_VOUCHER_9750"] = RockVoucher("VOLCANIC_ROCK_VOUCHER_9750", 200, state, True, 9750, cur_tte, product_instances["VOLCANIC_ROCK"], 20, 10, 20, 10, 20, 10)
-            product_instances["VOLCANIC_ROCK_VOUCHER_10000"] = RockVoucher("VOLCANIC_ROCK_VOUCHER_10000", 200, state, True, 10000, cur_tte, product_instances["VOLCANIC_ROCK"], 20, 10, 20, 10, 20, 10)
-            product_instances["VOLCANIC_ROCK_VOUCHER_10250"] = RockVoucher("VOLCANIC_ROCK_VOUCHER_10250", 200, state, True, 10250, cur_tte, product_instances["VOLCANIC_ROCK"], 20, 10, 20, 10, 20, 10)
-            product_instances["VOLCANIC_ROCK_VOUCHER_10500"] = RockVoucher("VOLCANIC_ROCK_VOUCHER_10500", 200, state, True, 10500, cur_tte, product_instances["VOLCANIC_ROCK"], 20, 10, 20, 10, 20, 10)
-
-            # PROSPERITY 4
-            '''
-            product_instances["EMERALDS"] = Emerald("EMERALDS", 80, state)
-            product_instances["TOMATOES"] = Tomato("TOMATOES", 80, state)
-            '''
+            product_instances["VOLCANIC_ROCK_VOUCHER_9500"]  = RockVoucher("VOLCANIC_ROCK_VOUCHER_9500",  200, state, True, 9500,  cur_tte, product_instances["VOLCANIC_ROCK"], 20, 1000, 20, 20, 20, 10)
+            product_instances["VOLCANIC_ROCK_VOUCHER_9750"]  = RockVoucher("VOLCANIC_ROCK_VOUCHER_9750",  200, state, True, 9750,  cur_tte, product_instances["VOLCANIC_ROCK"], 20, 1000, 20, 20, 20, 10)
+            product_instances["VOLCANIC_ROCK_VOUCHER_10000"] = RockVoucher("VOLCANIC_ROCK_VOUCHER_10000", 200, state, True, 10000, cur_tte, product_instances["VOLCANIC_ROCK"], 20, 1000, 20, 20, 20, 10)
+            product_instances["VOLCANIC_ROCK_VOUCHER_10250"] = RockVoucher("VOLCANIC_ROCK_VOUCHER_10250", 200, state, True, 10250, cur_tte, product_instances["VOLCANIC_ROCK"], 20, 1000, 20, 20, 20, 10)
+            product_instances["VOLCANIC_ROCK_VOUCHER_10500"] = RockVoucher("VOLCANIC_ROCK_VOUCHER_10500", 200, state, True, 10500, cur_tte, product_instances["VOLCANIC_ROCK"], 20, 1000, 20, 20, 20, 10)
             
             # turn on the trading unit; the products have been populated!
             Trader.turned_on = True
