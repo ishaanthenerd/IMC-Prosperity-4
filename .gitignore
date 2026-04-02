@@ -1,5 +1,9 @@
-backtests/
-__pycache__/
+algo/backtests/
+algo/__pycache__/
+algo_exploration/backtests/
+algo_exploration/__pycache__/
+p3_exploration/backtests/
+p3_exploration/__pycache__/
 myenv/
 .python-version
 .DS_Store
