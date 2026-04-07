@@ -4,10 +4,6 @@ from collections import deque
 import string, json, math, statistics
 import numpy as np
 
-# MATH FOR BLACK SCHOLES
-from math import floor, ceil, log, sqrt, exp
-from statistics import NormalDist
-
 class Logger:
     def __init__(self) -> None:
         self.logs = ""
@@ -399,271 +395,43 @@ class RollingZ():
         else:
             return 0
 
-class BlackScholes:
-    @staticmethod
-    def black_scholes_call(spot, strike, time_to_expiry, volatility):
-        d1 = (log(spot) - log(strike) + (0.5 * volatility * volatility) * time_to_expiry) / (volatility * sqrt(time_to_expiry))
-        d2 = d1 - volatility * sqrt(time_to_expiry)
-        call_price = spot * NormalDist().cdf(d1) - strike * NormalDist().cdf(d2)
-        return call_price
-
-    @staticmethod
-    def black_scholes_put(spot, strike, time_to_expiry, volatility):
-        d1 = (log(spot) - log(strike) + (0.5 * volatility * volatility) * time_to_expiry) / (volatility * sqrt(time_to_expiry))
-        d2 = d1 - volatility * sqrt(time_to_expiry)
-        put_price = strike * NormalDist().cdf(-d2) - spot * NormalDist().cdf(-d1)
-        return put_price
-
-    @staticmethod
-    def delta_call(spot, strike, time_to_expiry, volatility):
-        d1 = (log(spot) - log(strike) + (0.5 * volatility * volatility) * time_to_expiry) / (volatility * sqrt(time_to_expiry))
-        return NormalDist().cdf(d1)
-    
-    @staticmethod
-    def delta_put(spot, strike, time_to_expiry, volatility):
-        return BlackScholes.delta_call(spot, strike, time_to_expiry, volatility) - 1
-
-    @staticmethod
-    def gamma(spot, strike, time_to_expiry, volatility):
-        d1 = (log(spot) - log(strike) + (0.5 * volatility * volatility) * time_to_expiry) / (volatility * sqrt(time_to_expiry))
-        return NormalDist().pdf(d1) / (spot * volatility * sqrt(time_to_expiry))
-
-    @staticmethod
-    def vega(spot, strike, time_to_expiry, volatility):
-        d1 = (log(spot) - log(strike) + (0.5 * volatility * volatility) * time_to_expiry) / (volatility * sqrt(time_to_expiry))
-        return NormalDist().pdf(d1) * (spot * sqrt(time_to_expiry)) / 100
-
-    @staticmethod
-    def implied_volatility_call(
-        call_price, spot, strike, time_to_expiry, max_iterations=200, tolerance=1e-10
-    ):
-        low_vol = 0.0001
-        high_vol = 1.0
-        volatility = (low_vol + high_vol) / 2.0
-        for _ in range(max_iterations):
-            estimated_price = BlackScholes.black_scholes_call(spot, strike, time_to_expiry, volatility)
-            diff = estimated_price - call_price
-            if abs(diff) < tolerance:
-                break
-            elif diff > 0:
-                high_vol = volatility
-            else:
-                low_vol = volatility
-            volatility = (low_vol + high_vol) / 2.0
-        return volatility
-    
-    @staticmethod
-    def implied_volatility_put(
-        put_price, spot, strike, time_to_expiry, max_iterations=200, tolerance=1e-10
-    ):
-        low_vol = 0.0001
-        high_vol = 1.0
-        volatility = (low_vol + high_vol) / 2.0
-        for _ in range(max_iterations):
-            estimated_price = BlackScholes.black_scholes_put(spot, strike, time_to_expiry, volatility)
-            diff = estimated_price - put_price
-            if abs(diff) < tolerance:
-                break
-            elif diff > 0:
-                high_vol = volatility
-            else:
-                low_vol = volatility
-            volatility = (low_vol + high_vol) / 2.0
-        return volatility
-
-    @staticmethod
-    def moneyness(spot, strike, time_to_expiry):
-        return log(spot / strike) / sqrt(time_to_expiry)
-
-class Option(Product):
-    def __init__(self, symbol: str, limit: int, state: TradingState, 
-                 is_call: bool, strike: int, tte: float, underlying: Product,
-                 underlying_z_th: float, underlying_window: int, 
-                 iv_z_th: float, iv_window: int, 
-                 delta_z_th: float, delta_window: int):
-        super().__init__(symbol, limit, state)
-        self.is_call = is_call
-        self.strike = strike
-        self.tte = tte # time to expiry in years
-        self.underlying = underlying
-        self.underlying_prices = RollingZ(underlying_z_th, underlying_window)
-        self.underlying_bought = 0
-        self.underlying_sold = 0
-        self.ivs = RollingZ(iv_z_th, iv_window)
-        self.deltas = RollingZ(delta_z_th, delta_window)
-    
-    def update_tte(self, new_tte: float):
-        self.tte = new_tte
-        self.underlying_bought = 0
-        self.underlying_sold = 0
-
-    def fair_val(self):
-        if len(self.ivs.premiums) != self.ivs.window:
-            # when we can't trade, we are NOT bingqilin
-            logger.print("NOT bingqilin")
-            return
-        underlying_mid = self.underlying.fair_val()
-        avg_vol = self.ivs.mean()
-        std_vol = self.ivs.std()
-        if self.is_call:
-            cur_prices = [round(BlackScholes.black_scholes_call(underlying_mid, self.strike, self.tte, avg_vol + i * std_vol), 6) for i in range(-1, 2)]
-        else:
-            cur_prices = [round(BlackScholes.black_scholes_put(underlying_mid, self.strike, self.tte, avg_vol + i * std_vol), 6) for i in range(-1, 2)]
-        return cur_prices[1]
-
-    def strategy(self):
-        # add information to the RollingZ objects
-        underlying_mid = self.underlying.fair_val()
-        cur_mid = self.mid_price_using_best()
-        if self.is_call:
-            option_iv = BlackScholes.implied_volatility_call(cur_mid, underlying_mid, self.strike, self.tte)
-            option_delta = BlackScholes.delta_call(underlying_mid, self.strike, self.tte, option_iv)
-        else:
-            option_iv = BlackScholes.implied_volatility_put(cur_mid, underlying_mid, self.strike, self.tte)
-            option_delta = BlackScholes.delta_put(underlying_mid, self.strike, self.tte, option_iv)
-        
-        # cap ivs getting added (there's something causing it to spike like CRAZY)
-        if not (0.01 <= option_iv <= 0.99):
-            option_iv = max(self.ivs.mean() - 2 * self.ivs.std(), min(option_iv, self.ivs.mean() + 2 * self.ivs.std()))
-        
-        self.underlying_prices.add(underlying_mid)
-        self.ivs.add(round(option_iv, 6))
-        self.deltas.add(round(option_delta, 6))
-        if len(self.ivs.premiums) != self.ivs.window:
-            # when we can't trade, we are NOT bingqilin
-            logger.print("NOT bingqilin")
-            return
-
-        # DEBUG - check for bad IVs
-        # # Define reasonable IV bounds
-        # MIN_IV = 0.0       # IV can't be negative
-        # MAX_IV = 0.5       # Adjust depending on market
-        # # Check the array
-        # bad_indices = np.where((self.ivs.premiums < MIN_IV) | (self.ivs.premiums > MAX_IV))[0]
-        # # Assert that there are no bad values
-        # assert len(bad_indices) == 0, f"Found {len(bad_indices)} invalid IVs at indices {bad_indices}, values: {self.ivs.premiums[bad_indices]}"
-
-        # make prices; round to 6 places for readability
-        avg_vol = self.ivs.mean()
-        std_vol = self.ivs.std()
-        if self.is_call:
-            cur_prices = [round(BlackScholes.black_scholes_call(underlying_mid, self.strike, self.tte, avg_vol + i * std_vol), 6) for i in range(-1, 2)]
-        else:
-            cur_prices = [round(BlackScholes.black_scholes_put(underlying_mid, self.strike, self.tte, avg_vol + i * std_vol), 6) for i in range(-1, 2)]
-        
-        # market make on it
-        fair_value = cur_prices[1]
-        bid = int(math.floor(fair_value + 0.01))
-        ask = int(math.ceil(fair_value - 0.01))
-
-        # DEBUG - check for valid iv values
-        # logger.print("iv:", round(option_iv, 6))
-        # logger.print("avg_iv:", round(avg_vol, 6))
-        # logger.print("fair_value:", round(fair_value, 6))
-        # logger.print("market:", bid, "@", ask)
-        # if not math.isnan(self.best_ask()) and self.best_ask() < bid:
-        #     logger.print("we're buying")
-        # if not math.isnan(self.best_bid()) and ask < self.best_bid():
-        #     logger.print("we're selling")
-
-        # if not volatile enough, just leave the market you CLOWN
-        if (cur_prices[2] - cur_prices[0]) < 1.0:
-            return
-        
-        # keep track of information
-        best_bid = self.best_bid()
-        best_ask = self.best_ask()
-        if math.isnan(best_bid) or math.isnan(best_ask):
-            logger.print("missing best bid/ask")
-            return
-        bid_size = self.limit_buy_orders()
-        ask_size = self.limit_sell_orders()
-        max_spread = max(1, math.floor(fair_value * 0.03))
-        old_position = self.active_position()
-
-        # check if we are crossing markets with best_ask
-        for market_ask, market_amount in self.order_depth.sell_orders.items():
-            if bid > market_ask:
-                # eat their market then take it over
-                eat_order_size = abs(min(bid_size, abs(market_amount)))
-                self.buy(market_ask, eat_order_size)
-                    
-                # place bid above best bid
-                if best_bid is not None:
-                    bid = best_bid + 1
-                else:
-                    bid = int(math.floor(fair_value - max_spread))
-
-                # place ask at maximum dist from fair value
-                ask = int(math.ceil(max(fair_value + max_spread, ask)))
-                                
-        # check if we are crossing with best_bid
-        for market_bid, market_amount in self.order_depth.buy_orders.items():
-            if ask < market_bid:
-                # eat their market then take it over
-                eat_order_size = abs(min(ask_size, abs(market_amount)))
-                self.sell(market_bid, eat_order_size)
-                
-                # place ask below best ask
-                if best_ask is not None: 
-                    ask = best_ask - 1
-                else:
-                    ask = int(math.ceil(ask + max_spread))
-                
-                # place bid at maximum dist from fair value
-                bid = int(math.floor(max(fair_value - max_spread, bid)))
-        
-        # rebalance position
-        bid_size = self.limit_buy_orders()
-        ask_size = self.limit_sell_orders()
-        if bid == ask:
-            if bid_size > ask_size:
-                self.buy(bid, bid_size)
-            elif ask_size > bid_size:
-                self.sell(ask, ask_size)
-        else:
-            self.buy(bid, bid_size)
-            self.sell(ask, ask_size)
-
-        # delta hedge
-        position_change = self.active_position() - old_position
-        avg_delta = self.deltas.mean()
-        if self.is_call:
-            if position_change > 0:
-                self.underlying.sell(self.underlying.mid_price_using_best(), int(ceil(position_change * avg_delta)))
-            elif position_change < 0:
-                self.underlying.buy(self.underlying.mid_price_using_best(), int(floor(-position_change * avg_delta)))
-        else:
-            if position_change > 0:
-                self.underlying.buy(self.underlying.mid_price_using_best(), int(ceil(position_change * -avg_delta)))
-            elif position_change < 0:
-                self.underlying.sell(self.underlying.mid_price_using_best(), int(floor(-position_change * -avg_delta)))
-
 '''
 PRODUCT CLASSES
 '''
 
-# it's time to make the ROCK
-class Rock(Product):
+class Macaron(Product):
     def __init__(self, product, limit, state):
         super().__init__(product, limit, state)
+        self.conversions = 0
     
     def fair_val(self):
-        return self.mid_price_using_best()
+        pass
     
     def strategy(self):
-        self.market_take(self.fair_val())
-        self.mm_undercut_balanced(self.fair_val(), 5)
+        # reset conversions amount
+        self.conversions = 0
 
-class RockVoucher(Option):
-    def __init__(self, symbol, limit, state, is_call, strike, tte, underlying, underlying_z_th, underlying_window, iv_z_th, iv_window, delta_z_th, delta_window):
-        super().__init__(symbol, limit, state, is_call, strike, tte, underlying, underlying_z_th, underlying_window, iv_z_th, iv_window, delta_z_th, delta_window)
-    
-    def fair_val(self):
-        return super().fair_val()
-    
-    def strategy(self):
-        super().strategy()
+        # convert anything by buying local
+        if self.active_position() < 0:
+            self.conversions = min(-self.active_position(), 10) # 10 at a time
+
+        # get observation info
+        obs = self.state.observations.conversionObservations.get("MAGNIFICENT_MACARONS", None)
+        if obs is None:
+            return
+        island_ask = obs.askPrice
+        transport_fee = obs.transportFees
+        import_tariff = obs.importTariff
+
+        # get local trading price and arbitrage
+        ask_val = math.ceil(island_ask + transport_fee + import_tariff)
+        for bid_price, bid_vol in self.order_depth.buy_orders.items():
+            if bid_price > ask_val or (bid_price == ask_val and self.active_position() > 0): 
+                sell_vol = min(self.max_sell_orders(), bid_vol)
+                if bid_price == ask_val:
+                    sell_vol = min(sell_vol, self.active_position())
+                if sell_vol > 0:
+                    self.sell(bid_price, sell_vol)
 
 '''
 TRADING EXECUTION
@@ -679,19 +447,11 @@ class Trader:
     def run(self, state: TradingState):
         result = {}
         traderData = ""
-        # SET THIS CORRECTLY
-        cur_day = 1
-        cur_tte = ((8 - cur_day) / 365) - (state.timestamp / 365e6)
 
         if not Trader.turned_on:
             # initiate the products / arbitrages
-            product_instances["VOLCANIC_ROCK"] = Rock("VOLCANIC_ROCK", 400, state)
-            product_instances["VOLCANIC_ROCK_VOUCHER_9500"]  = RockVoucher("VOLCANIC_ROCK_VOUCHER_9500",  200, state, True, 9500,  cur_tte, product_instances["VOLCANIC_ROCK"], 20, 1000, 20, 20, 20, 10)
-            product_instances["VOLCANIC_ROCK_VOUCHER_9750"]  = RockVoucher("VOLCANIC_ROCK_VOUCHER_9750",  200, state, True, 9750,  cur_tte, product_instances["VOLCANIC_ROCK"], 20, 1000, 20, 20, 20, 10)
-            product_instances["VOLCANIC_ROCK_VOUCHER_10000"] = RockVoucher("VOLCANIC_ROCK_VOUCHER_10000", 200, state, True, 10000, cur_tte, product_instances["VOLCANIC_ROCK"], 20, 1000, 20, 20, 20, 10)
-            product_instances["VOLCANIC_ROCK_VOUCHER_10250"] = RockVoucher("VOLCANIC_ROCK_VOUCHER_10250", 200, state, True, 10250, cur_tte, product_instances["VOLCANIC_ROCK"], 20, 1000, 20, 20, 20, 10)
-            product_instances["VOLCANIC_ROCK_VOUCHER_10500"] = RockVoucher("VOLCANIC_ROCK_VOUCHER_10500", 200, state, True, 10500, cur_tte, product_instances["VOLCANIC_ROCK"], 20, 1000, 20, 20, 20, 10)
-            
+            product_instances["MAGNIFICENT_MACARONS"] = Macaron("MAGNIFICENT_MACARONS", 30, state)
+
             # turn on the trading unit; the products have been populated!
             Trader.turned_on = True
         else:
@@ -699,18 +459,15 @@ class Trader:
             for product, instance in product_instances.items():
                 instance.reset_state(state)
 
-        # update tte for options
-        for product, instance in product_instances.items():
-            if isinstance(instance, Option):
-                instance.update_tte(cur_tte)
-
         # after ALL instantiating or resetting is done, then execute strategies
+        conversions = 0
         for product, instance in product_instances.items():
             if isinstance(instance, Product):
                 instance.strategy()
                 result[product] = instance.orders
                 logger.print("Orders for ", product, ": ", instance.orders)
-
-        conversions = 0
+                if isinstance(instance, Macaron):
+                    conversions = instance.conversions
+        
         logger.flush(state, result, conversions, traderData)
         return result, conversions, traderData
