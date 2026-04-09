@@ -419,7 +419,7 @@ class Tomato(Product):
     
     def strategy(self):
         self.market_take(self.fair_val())
-        self.mm_undercut_balanced(self.fair_val(), 5)
+        self.mm_undercut(self.fair_val(), 4)
 
 '''
 TRADING EXECUTION
