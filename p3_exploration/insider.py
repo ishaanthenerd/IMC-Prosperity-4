@@ -156,7 +156,7 @@ class Product():
         self.traderData = state.traderData
         self.timestamp = state.timestamp
         self.listings = state.listings
-        self.order_depth = state.order_depths[product]
+        self.order_depth = state.order_depths.get(product, None)
         self.own_trades = state.own_trades
         self.market_trades = state.market_trades
         self.position = state.position
@@ -177,7 +177,7 @@ class Product():
         self.traderData = new_state.traderData
         self.timestamp = new_state.timestamp
         self.listings = new_state.listings
-        self.order_depth = new_state.order_depths[self.product]
+        self.order_depth = new_state.order_depths.get(self.product, None)
         self.own_trades = new_state.own_trades
         self.market_trades = new_state.market_trades
         self.position = new_state.position
@@ -363,11 +363,12 @@ class Product():
         ...
 
 class RollingZ():
-    def __init__(self, z_th: float, window: int, fixed_mean: float = math.nan):
+    def __init__(self, z_th: float, window: int, fixed_mean: float = math.nan, fixed_std: float = math.nan):
         self.premiums = np.array([], dtype = float)
         self.z_th = z_th
         self.window = window
         self.fixed_mean = fixed_mean
+        self.fixed_std = fixed_std
 
     def add(self, new_val: float):
         self.premiums = np.append(self.premiums, new_val)
@@ -380,7 +381,7 @@ class RollingZ():
         return self.fixed_mean if not math.isnan(self.fixed_mean) else np.mean(self.premiums)
 
     def std(self):
-        return np.std(self.premiums)
+        return self.fixed_std if not math.isnan(self.fixed_std) else np.std(self.premiums)
     
     def most_recent(self):
         return self.premiums[-1]
@@ -390,18 +391,69 @@ class RollingZ():
         if np.std(self.premiums) == 0 or len(self.premiums) != self.window:
             return 0
         
-        z_score = 0
-        if math.isnan(self.fixed_mean):
-            z_score = (self.premiums[-1] - np.mean(self.premiums)) / np.std(self.premiums)
-        else:
-            z_score = (self.premiums[-1] - self.fixed_mean) / np.std(self.premiums)
-
+        z_score = (self.most_recent() - self.mean()) / self.std()
         if z_score < -self.z_th:
             return 1
         elif z_score > self.z_th:
             return -1
         else:
             return 0
+
+class Arbitrage(Product):
+    def __init__(self, 
+                 product: str, limit: int, state: TradingState, 
+                 lhs: List[Product], lhs_scalars: List[int], 
+                 rhs: List[Product], rhs_scalars: List[int], 
+                 z_th: float, window: int, fixed_mean: float = math.nan, fixed_std: float = math.nan):
+        super().__init__(product, limit, state)
+        self.rolling_z = RollingZ(z_th = z_th, window = window, fixed_mean = fixed_mean, fixed_std = fixed_std)
+        self.lhs = lhs
+        self.lhs_scalars = lhs_scalars
+        self.rhs = rhs
+        self.rhs_scalars = rhs_scalars
+
+    def fair_val(self):
+        return self.rolling_z.mean()
+
+    def strategy(self):
+        difference = 0
+
+        # LToR means buy LHS sell RHS
+        maxLToR = 1000000
+        maxRToL = 1000000
+        for i in range(len(self.lhs)):
+            product = self.lhs[i]
+            amt = self.lhs_scalars[i]
+            maxLToR = min(maxLToR, product.max_buy_orders() // amt)
+            maxRToL = min(maxRToL, product.max_sell_orders() // amt)
+            difference += product.mid_price_using_best() * amt
+
+        for i in range(len(self.rhs)):
+            product = self.rhs[i]
+            amt = self.rhs_scalars[i]
+            maxLToR = min(maxLToR, product.max_sell_orders() // amt)
+            maxRToL = min(maxRToL, product.max_buy_orders() // amt)
+            difference -= product.mid_price_using_best() * amt
+
+        self.rolling_z.add(difference)
+        signal = self.rolling_z.signal()
+        if signal == -1:
+            if maxLToR > 0:
+                for product, amt in zip(self.lhs, self.lhs_scalars):
+                    product.full_buy(amt * maxLToR)
+                    # product.buy(product.best_ask(), amt * maxLToR)
+                for product, amt in zip(self.rhs, self.rhs_scalars):
+                    product.full_sell(amt * maxLToR)
+                    # product.sell(product.best_bid(), amt * maxLToR)
+
+        elif signal == 1:
+            if maxRToL > 0:
+                for product, amt in zip(self.rhs, self.rhs_scalars):
+                    product.full_sell(amt * maxRToL)
+                    # product.sell(product.best_bid(), amt * maxRToL)
+                for product, amt in zip(self.lhs, self.lhs_scalars):
+                    product.full_buy(amt * maxRToL)
+                    # product.buy(product.best_ask(), amt * maxRToL)
 
 class BlackScholes:
     @staticmethod
@@ -708,7 +760,55 @@ class SquidInk(Product):
             elif self.fair_val() < self.recent_prices.premiums[-2] - 10:
                 self.full_buy(self.orderbook_sell_size())
 
-# TODO: build arbitrage classes
+class Croissant(Product):
+    def __init__(self, product, limit, state):
+        super().__init__(product, limit, state)
+    
+    def fair_val(self):
+        return self.mid_price_using_best()
+    
+    def strategy(self):
+        self.mm_undercut_balanced(self.fair_val(), 1)
+
+class Jam(Product):
+    def __init__(self, product, limit, state):
+        super().__init__(product, limit, state)
+    
+    def fair_val(self):
+        return self.mid_price_using_best()
+    
+    def strategy(self):
+        self.mm_undercut_balanced(self.fair_val(), 1)
+
+class Djembe(Product):
+    def __init__(self, product, limit, state):
+        super().__init__(product, limit, state)
+    
+    def fair_val(self):
+        return self.mid_price_using_best()
+    
+    def strategy(self):
+        self.mm_undercut_balanced(self.fair_val(), 1)
+
+class Basket1(Product):
+    def __init__(self, product, limit, state):
+        super().__init__(product, limit, state)
+    
+    def fair_val(self):
+        return self.mid_price_using_best()
+    
+    def strategy(self):
+        self.mm_undercut_balanced(self.fair_val(), 5)
+
+class Basket2(Product):
+    def __init__(self, product, limit, state):
+        super().__init__(product, limit, state)
+    
+    def fair_val(self):
+        return self.mid_price_using_best()
+    
+    def strategy(self):
+        pass
 
 class Rock(Product):
     def __init__(self, product, limit, state):
@@ -787,15 +887,41 @@ class Trader:
             # initiate the products / arbitrages
             # NOTE: exclude Macarons, as there is no backtesting for conversions
 
-            # product_instances["RAINFOREST_RESIN"] = Resin("RAINFOREST_RESIN", 50, state)
-            # product_instances["KELP"] = Kelp("KELP", 50, state)
+            # DAY 1
+            product_instances["RAINFOREST_RESIN"] = Resin("RAINFOREST_RESIN", 50, state)
+            product_instances["KELP"] = Kelp("KELP", 50, state)
             product_instances["SQUID_INK"] = SquidInk("SQUID_INK", 50, state)
-            # product_instances["VOLCANIC_ROCK"] = Rock("VOLCANIC_ROCK", 400, state)
-            # product_instances["VOLCANIC_ROCK_VOUCHER_9500"]  = RockVoucher("VOLCANIC_ROCK_VOUCHER_9500",  200, state, True, 9500,  cur_tte, product_instances["VOLCANIC_ROCK"], 20, 1000, 20, 20, 20, 10)
-            # product_instances["VOLCANIC_ROCK_VOUCHER_9750"]  = RockVoucher("VOLCANIC_ROCK_VOUCHER_9750",  200, state, True, 9750,  cur_tte, product_instances["VOLCANIC_ROCK"], 20, 1000, 20, 20, 20, 10)
-            # product_instances["VOLCANIC_ROCK_VOUCHER_10000"] = RockVoucher("VOLCANIC_ROCK_VOUCHER_10000", 200, state, True, 10000, cur_tte, product_instances["VOLCANIC_ROCK"], 20, 1000, 20, 20, 20, 10)
-            # product_instances["VOLCANIC_ROCK_VOUCHER_10250"] = RockVoucher("VOLCANIC_ROCK_VOUCHER_10250", 200, state, True, 10250, cur_tte, product_instances["VOLCANIC_ROCK"], 20, 1000, 20, 20, 20, 10)
-            # product_instances["VOLCANIC_ROCK_VOUCHER_10500"] = RockVoucher("VOLCANIC_ROCK_VOUCHER_10500", 200, state, True, 10500, cur_tte, product_instances["VOLCANIC_ROCK"], 20, 1000, 20, 20, 20, 10)
+
+            # DAY 2
+            product_instances["CROISSANTS"] = Croissant("CROISSANTS", 250, state)
+            product_instances["JAMS"] = Jam("JAMS", 350, state)
+            product_instances["DJEMBES"] = Djembe("DJEMBES", 60, state)
+            product_instances["PICNIC_BASKET1"] = Basket1("PICNIC_BASKET1", 60, state)
+            product_instances["PICNIC_BASKET2"] = Basket2("PICNIC_BASKET2", 100, state)
+            product_instances["ARBITRAGE_1"] = Arbitrage(
+                "ARBITRAGE_1", 1000000000, state,
+                [product_instances["PICNIC_BASKET1"]], 
+                [1],
+                [product_instances["CROISSANTS"], product_instances["JAMS"], product_instances["DJEMBES"]], 
+                [6, 3, 1],
+                1, 30, 48, 85
+            )
+            product_instances["ARBITRAGE_2"] = Arbitrage(
+                "ARBITRAGE_2", 1000000000, state,
+                [product_instances["PICNIC_BASKET2"]], 
+                [1],
+                [product_instances["CROISSANTS"], product_instances["JAMS"]],
+                [4, 2],
+                1, 30, 30, 60
+            )
+
+            # DAY 3
+            product_instances["VOLCANIC_ROCK"] = Rock("VOLCANIC_ROCK", 400, state)
+            product_instances["VOLCANIC_ROCK_VOUCHER_9500"]  = RockVoucher("VOLCANIC_ROCK_VOUCHER_9500",  200, state, True, 9500,  cur_tte, product_instances["VOLCANIC_ROCK"], 20, 1000, 20, 20, 20, 10)
+            product_instances["VOLCANIC_ROCK_VOUCHER_9750"]  = RockVoucher("VOLCANIC_ROCK_VOUCHER_9750",  200, state, True, 9750,  cur_tte, product_instances["VOLCANIC_ROCK"], 20, 1000, 20, 20, 20, 10)
+            product_instances["VOLCANIC_ROCK_VOUCHER_10000"] = RockVoucher("VOLCANIC_ROCK_VOUCHER_10000", 200, state, True, 10000, cur_tte, product_instances["VOLCANIC_ROCK"], 20, 1000, 20, 20, 20, 10)
+            product_instances["VOLCANIC_ROCK_VOUCHER_10250"] = RockVoucher("VOLCANIC_ROCK_VOUCHER_10250", 200, state, True, 10250, cur_tte, product_instances["VOLCANIC_ROCK"], 20, 1000, 20, 20, 20, 10)
+            product_instances["VOLCANIC_ROCK_VOUCHER_10500"] = RockVoucher("VOLCANIC_ROCK_VOUCHER_10500", 200, state, True, 10500, cur_tte, product_instances["VOLCANIC_ROCK"], 20, 1000, 20, 20, 20, 10)
 
             # turn on the trading unit; the products have been populated!
             Trader.turned_on = True

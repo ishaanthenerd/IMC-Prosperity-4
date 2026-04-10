@@ -148,7 +148,7 @@ class Product():
         self.traderData = state.traderData
         self.timestamp = state.timestamp
         self.listings = state.listings
-        self.order_depth = state.order_depths[product]
+        self.order_depth = state.order_depths.get(product, None)
         self.own_trades = state.own_trades
         self.market_trades = state.market_trades
         self.position = state.position
@@ -169,7 +169,7 @@ class Product():
         self.traderData = new_state.traderData
         self.timestamp = new_state.timestamp
         self.listings = new_state.listings
-        self.order_depth = new_state.order_depths[self.product]
+        self.order_depth = new_state.order_depths.get(self.product, None)
         self.own_trades = new_state.own_trades
         self.market_trades = new_state.market_trades
         self.position = new_state.position
