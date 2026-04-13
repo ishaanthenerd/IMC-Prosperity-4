@@ -7,7 +7,7 @@ import matplotlib.pyplot as plt
 DATA HANDLING
 '''
 
-# Load data from all three files
+# Load data from all three files; add info about best/worst bid/ask
 def extract_data(
         cur_round: int, 
         rows_per_file: int = 80000
@@ -20,6 +20,14 @@ def extract_data(
         df.index = df.index + rows_per_file * (day - (cur_round - 3))
         df["timestamp"] = df["timestamp"] + 1000000 * day
         full_df = pd.concat([full_df, df])
+
+    bids = ["bid_price_1", "bid_price_2", "bid_price_3"]
+    asks = ["ask_price_1", "ask_price_2", "ask_price_3"]
+    full_df["best_bid"] = full_df[bids].max(axis=1)
+    full_df["best_ask"] = full_df[asks].min(axis=1)
+    full_df["worst_bid"] = full_df[bids].min(axis=1)
+    full_df["worst_ask"] = full_df[asks].max(axis=1)
+
     return full_df
 
 # Plot two columns of a DataFrame against each other
@@ -38,6 +46,43 @@ def plot_df(
     plt.grid(True, alpha=0.3)
     plt.tight_layout()
     plt.show()
+
+# Plot a set of columns of a DataFrame against timestamp
+def plot_against_timestamp(
+        df: pd.DataFrame,
+        columns: list[str],
+        title: str = "",
+    ):
+
+    plt.figure(figsize=(12, 6))
+    for column in columns:
+        plt.plot(df["timestamp"], df[column], linewidth=1)
+    plt.title(title)
+    plt.xlabel("timestamp")
+    plt.grid(True, alpha=0.3)
+    plt.tight_layout()
+    plt.show()
+
+# Plot mid price + other prices against timestamp
+def plot_mid_price(
+        df: pd.DataFrame,
+        incl_best_bid: bool = False,
+        incl_best_ask: bool = False,
+        incl_worst_bid: bool = False,
+        incl_worst_ask: bool = False,   
+        title: str = "", 
+    ):
+
+    columns = ["mid_price"]
+    if incl_best_bid:
+        columns.append("best_bid")
+    if incl_best_ask:
+        columns.append("best_ask")
+    if incl_worst_bid:
+        columns.append("worst_bid")
+    if incl_worst_ask:
+        columns.append("worst_ask")
+    plot_against_timestamp(df, columns, title)
 
 '''
 COMPUTATION
@@ -61,4 +106,3 @@ def auto_correlation(
     x = tmp[column2]
     y = tmp[column2].shift(lag)
     return x.corr(y)
-

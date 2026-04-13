@@ -392,6 +392,7 @@ class RollingZ():
             return 0
         
         z_score = (self.most_recent() - self.mean()) / self.std()
+        logger.print(f"z_score = {z_score}")
         if z_score < -self.z_th:
             return 1
         elif z_score > self.z_th:
@@ -404,56 +405,64 @@ class Arbitrage(Product):
                  product: str, limit: int, state: TradingState, 
                  lhs: List[Product], lhs_scalars: List[int], 
                  rhs: List[Product], rhs_scalars: List[int], 
-                 z_th: float, window: int, fixed_mean: float = math.nan, fixed_std: float = math.nan):
+                 z_th: float, window: int, 
+                 fixed_mean: float = math.nan, fixed_std: float = math.nan):
         super().__init__(product, limit, state)
         self.rolling_z = RollingZ(z_th = z_th, window = window, fixed_mean = fixed_mean, fixed_std = fixed_std)
         self.lhs = lhs
         self.lhs_scalars = lhs_scalars
         self.rhs = rhs
         self.rhs_scalars = rhs_scalars
+        self.executed = False
 
     def fair_val(self):
         return self.rolling_z.mean()
 
     def strategy(self):
+        # this represents price of (LHS - RHS)
         difference = 0
 
         # LToR means buy LHS sell RHS
         maxLToR = 1000000
         maxRToL = 1000000
-        for i in range(len(self.lhs)):
-            product = self.lhs[i]
-            amt = self.lhs_scalars[i]
+        for product, amt in zip(self.lhs, self.lhs_scalars):
             maxLToR = min(maxLToR, product.max_buy_orders() // amt)
             maxRToL = min(maxRToL, product.max_sell_orders() // amt)
             difference += product.mid_price_using_best() * amt
 
-        for i in range(len(self.rhs)):
-            product = self.rhs[i]
-            amt = self.rhs_scalars[i]
+        for product, amt in zip(self.rhs, self.rhs_scalars):
             maxLToR = min(maxLToR, product.max_sell_orders() // amt)
             maxRToL = min(maxRToL, product.max_buy_orders() // amt)
             difference -= product.mid_price_using_best() * amt
 
         self.rolling_z.add(difference)
         signal = self.rolling_z.signal()
-        if signal == -1:
-            if maxLToR > 0:
-                for product, amt in zip(self.lhs, self.lhs_scalars):
-                    product.full_buy(amt * maxLToR)
-                    # product.buy(product.best_ask(), amt * maxLToR)
-                for product, amt in zip(self.rhs, self.rhs_scalars):
-                    product.full_sell(amt * maxLToR)
-                    # product.sell(product.best_bid(), amt * maxLToR)
+        logger.print(f"signal = {signal}")
 
-        elif signal == 1:
-            if maxRToL > 0:
-                for product, amt in zip(self.rhs, self.rhs_scalars):
-                    product.full_sell(amt * maxRToL)
-                    # product.sell(product.best_bid(), amt * maxRToL)
+        if signal == 1:
+            self.executed = True
+            # RHS is more expensive than LHS -> buy LHS, sell RHS
+            if maxLToR > 0:
+                logger.print(f"maxLToR = {maxLToR}")
                 for product, amt in zip(self.lhs, self.lhs_scalars):
-                    product.full_buy(amt * maxRToL)
-                    # product.buy(product.best_ask(), amt * maxRToL)
+                    product.buy(product.worst_ask(), amt * maxLToR)
+                for product, amt in zip(self.rhs, self.rhs_scalars):
+                    product.sell(product.worst_bid(), amt * maxLToR)
+        elif signal == -1:
+            self.executed = True
+            # LHS is more expensive than RHS -> buy RHS, sell LHS
+            if maxRToL > 0:
+                logger.print(f"maxRToL = {maxRToL}")
+                for product, amt in zip(self.rhs, self.rhs_scalars):
+                    product.buy(product.worst_ask(), amt * maxRToL)
+                for product, amt in zip(self.lhs, self.lhs_scalars):
+                    product.sell(product.worst_bid(), amt * maxRToL)
+        else:
+            # rebalance position
+            for product, amt in zip(self.lhs, self.lhs_scalars):
+                product.mm_undercut_balanced(product.fair_val(), 1)
+            for product, amt in zip(self.rhs, self.rhs_scalars):
+                product.mm_undercut_balanced(product.fair_val(), 1)
 
 class BlackScholes:
     @staticmethod
@@ -768,7 +777,7 @@ class Croissant(Product):
         return self.mid_price_using_best()
     
     def strategy(self):
-        self.mm_undercut_balanced(self.fair_val(), 1)
+        pass # self.mm_undercut_balanced(self.fair_val(), 1)
 
 class Jam(Product):
     def __init__(self, product, limit, state):
@@ -778,7 +787,7 @@ class Jam(Product):
         return self.mid_price_using_best()
     
     def strategy(self):
-        self.mm_undercut_balanced(self.fair_val(), 1)
+        pass # self.mm_undercut_balanced(self.fair_val(), 1)
 
 class Djembe(Product):
     def __init__(self, product, limit, state):
@@ -788,7 +797,7 @@ class Djembe(Product):
         return self.mid_price_using_best()
     
     def strategy(self):
-        self.mm_undercut_balanced(self.fair_val(), 1)
+        pass # self.mm_undercut_balanced(self.fair_val(), 1)
 
 class Basket1(Product):
     def __init__(self, product, limit, state):
@@ -798,7 +807,7 @@ class Basket1(Product):
         return self.mid_price_using_best()
     
     def strategy(self):
-        self.mm_undercut_balanced(self.fair_val(), 5)
+        pass
 
 class Basket2(Product):
     def __init__(self, product, limit, state):
@@ -888,9 +897,9 @@ class Trader:
             # NOTE: exclude Macarons, as there is no backtesting for conversions
 
             # DAY 1
-            product_instances["RAINFOREST_RESIN"] = Resin("RAINFOREST_RESIN", 50, state)
-            product_instances["KELP"] = Kelp("KELP", 50, state)
-            product_instances["SQUID_INK"] = SquidInk("SQUID_INK", 50, state)
+            # product_instances["RAINFOREST_RESIN"] = Resin("RAINFOREST_RESIN", 50, state)
+            # product_instances["KELP"] = Kelp("KELP", 50, state)
+            # product_instances["SQUID_INK"] = SquidInk("SQUID_INK", 50, state)
 
             # DAY 2
             product_instances["CROISSANTS"] = Croissant("CROISSANTS", 250, state)
@@ -898,30 +907,44 @@ class Trader:
             product_instances["DJEMBES"] = Djembe("DJEMBES", 60, state)
             product_instances["PICNIC_BASKET1"] = Basket1("PICNIC_BASKET1", 60, state)
             product_instances["PICNIC_BASKET2"] = Basket2("PICNIC_BASKET2", 100, state)
-            product_instances["ARBITRAGE_1"] = Arbitrage(
-                "ARBITRAGE_1", 1000000000, state,
-                [product_instances["PICNIC_BASKET1"]], 
+            
+            product_instances["PB1_WITH_PB2"] = Arbitrage(
+                "PB1_WITH_PB2", 1000000000, state,
+                [product_instances["PICNIC_BASKET1"]],
                 [1],
-                [product_instances["CROISSANTS"], product_instances["JAMS"], product_instances["DJEMBES"]], 
-                [6, 3, 1],
-                1, 30, 48, 85
-            )
-            product_instances["ARBITRAGE_2"] = Arbitrage(
-                "ARBITRAGE_2", 1000000000, state,
-                [product_instances["PICNIC_BASKET2"]], 
-                [1],
-                [product_instances["CROISSANTS"], product_instances["JAMS"]],
-                [4, 2],
-                1, 30, 30, 60
+                [product_instances["PICNIC_BASKET2"], 
+                 product_instances["CROISSANTS"], 
+                 product_instances["JAMS"], 
+                 product_instances["DJEMBES"]],
+                [1, 2, 1, 1],
+                3.6, 100
             )
 
+            # OLD CODE
+            # product_instances["ARBITRAGE_1"] = Arbitrage(
+            #     "ARBITRAGE_1", 1000000000, state,
+            #     [product_instances["PICNIC_BASKET1"]], 
+            #     [1],
+            #     [product_instances["CROISSANTS"], product_instances["JAMS"], product_instances["DJEMBES"]], 
+            #     [6, 3, 1],
+            #     1, 30, 48, 85
+            # )
+            # product_instances["ARBITRAGE_2"] = Arbitrage(
+            #     "ARBITRAGE_2", 1000000000, state,
+            #     [product_instances["PICNIC_BASKET2"]], 
+            #     [1],
+            #     [product_instances["CROISSANTS"], product_instances["JAMS"]],
+            #     [4, 2],
+            #     1.5, 30, 30, 60
+            # )
+
             # DAY 3
-            product_instances["VOLCANIC_ROCK"] = Rock("VOLCANIC_ROCK", 400, state)
-            product_instances["VOLCANIC_ROCK_VOUCHER_9500"]  = RockVoucher("VOLCANIC_ROCK_VOUCHER_9500",  200, state, True, 9500,  cur_tte, product_instances["VOLCANIC_ROCK"], 20, 1000, 20, 20, 20, 10)
-            product_instances["VOLCANIC_ROCK_VOUCHER_9750"]  = RockVoucher("VOLCANIC_ROCK_VOUCHER_9750",  200, state, True, 9750,  cur_tte, product_instances["VOLCANIC_ROCK"], 20, 1000, 20, 20, 20, 10)
-            product_instances["VOLCANIC_ROCK_VOUCHER_10000"] = RockVoucher("VOLCANIC_ROCK_VOUCHER_10000", 200, state, True, 10000, cur_tte, product_instances["VOLCANIC_ROCK"], 20, 1000, 20, 20, 20, 10)
-            product_instances["VOLCANIC_ROCK_VOUCHER_10250"] = RockVoucher("VOLCANIC_ROCK_VOUCHER_10250", 200, state, True, 10250, cur_tte, product_instances["VOLCANIC_ROCK"], 20, 1000, 20, 20, 20, 10)
-            product_instances["VOLCANIC_ROCK_VOUCHER_10500"] = RockVoucher("VOLCANIC_ROCK_VOUCHER_10500", 200, state, True, 10500, cur_tte, product_instances["VOLCANIC_ROCK"], 20, 1000, 20, 20, 20, 10)
+            # product_instances["VOLCANIC_ROCK"] = Rock("VOLCANIC_ROCK", 400, state)
+            # product_instances["VOLCANIC_ROCK_VOUCHER_9500"]  = RockVoucher("VOLCANIC_ROCK_VOUCHER_9500",  200, state, True, 9500,  cur_tte, product_instances["VOLCANIC_ROCK"], 20, 1000, 20, 20, 20, 10)
+            # product_instances["VOLCANIC_ROCK_VOUCHER_9750"]  = RockVoucher("VOLCANIC_ROCK_VOUCHER_9750",  200, state, True, 9750,  cur_tte, product_instances["VOLCANIC_ROCK"], 20, 1000, 20, 20, 20, 10)
+            # product_instances["VOLCANIC_ROCK_VOUCHER_10000"] = RockVoucher("VOLCANIC_ROCK_VOUCHER_10000", 200, state, True, 10000, cur_tte, product_instances["VOLCANIC_ROCK"], 20, 1000, 20, 20, 20, 10)
+            # product_instances["VOLCANIC_ROCK_VOUCHER_10250"] = RockVoucher("VOLCANIC_ROCK_VOUCHER_10250", 200, state, True, 10250, cur_tte, product_instances["VOLCANIC_ROCK"], 20, 1000, 20, 20, 20, 10)
+            # product_instances["VOLCANIC_ROCK_VOUCHER_10500"] = RockVoucher("VOLCANIC_ROCK_VOUCHER_10500", 200, state, True, 10500, cur_tte, product_instances["VOLCANIC_ROCK"], 20, 1000, 20, 20, 20, 10)
 
             # turn on the trading unit; the products have been populated!
             Trader.turned_on = True
@@ -936,9 +959,14 @@ class Trader:
                 instance.update_tte(cur_tte)
 
         # after ALL instantiating or resetting is done, then execute strategies
+
+        # first, handle arbitrages
+        product_instances["PB1_WITH_PB2"].strategy()
+
+        # second, handle non-arbitrages
         conversions = 0
         for product, instance in product_instances.items():
-            if isinstance(instance, Product):
+            if isinstance(instance, Product) and not isinstance(instance, Arbitrage):
                 instance.strategy()
                 result[product] = instance.orders
                 logger.print("Orders for ", product, ": ", instance.orders)
