@@ -28,6 +28,7 @@ def extract_data(
     full_df["worst_bid"] = full_df[bids].min(axis=1)
     full_df["worst_ask"] = full_df[asks].max(axis=1)
 
+    assert(False)
     return full_df
 
 # Plot two columns of a DataFrame against each other
