@@ -397,19 +397,18 @@ PRODUCT CLASSES
 '''
 
 class AshCoatedOsmium(Product):
-    def __init__(self, symbol: str, limit: int, state: TradingState, 
-                 fixed_mean: float = math.nan, fixed_std: float = math.nan):
+    def __init__(self, symbol: str, limit: int, state: TradingState):
         super().__init__(symbol, limit, state)
-        self.fixed_mean = fixed_mean
-        self.fixed_std = fixed_std
-        self.rolling_z = RollingZ(z_th = 1.5, window = 20, fixed_mean = fixed_mean, fixed_std = fixed_std)
+        self.recent = math.nan # keeps track of prior mid
 
     def fair_val(self):
-        return self.fixed_mean
+        if not math.isnan(self.mid_price_using_best()):
+            self.recent = self.mid_price_using_best()
+        return self.recent if not math.isnan(self.recent) else 10000
     
     def strategy(self):
-        # ellison's strat
-        self.market_make(self.fair_val() - self.fixed_std * 2, self.fair_val() + self.fixed_std * 2)
+        self.market_take(self.fair_val())
+        self.mm_undercut(self.fair_val(), 7)
 
 class IntarianPepperRoot(Product):
     def __init__(self, symbol: str, limit: int, state: TradingState):
@@ -445,8 +444,8 @@ class Trader:
 
         if not Trader.turned_on:
             # initiate the products / arbitrages
-            product_instances["ASH_COATED_OSMIUM"] = AshCoatedOsmium("ASH_COATED_OSMIUM", 80, state, 10000, 3)
-            # product_instances["INTARIAN_PEPPER_ROOT"] = IntarianPepperRoot("INTARIAN_PEPPER_ROOT", 80, state)
+            product_instances["ASH_COATED_OSMIUM"] = AshCoatedOsmium("ASH_COATED_OSMIUM", 80, state)
+            product_instances["INTARIAN_PEPPER_ROOT"] = IntarianPepperRoot("INTARIAN_PEPPER_ROOT", 80, state)
 
             # turn on the trading unit; the products have been populated!
             Trader.turned_on = True
