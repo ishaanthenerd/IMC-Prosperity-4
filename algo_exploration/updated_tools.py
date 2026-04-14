@@ -84,6 +84,40 @@ def plot_mid_price(
         columns.append("worst_ask")
     plot_against_timestamp(df, columns, title)
 
+def plot_orderbook_buy_size(
+        df: pd.DataFrame,
+        title: str = "",    
+    ):
+
+    volume_cols_bid = ["bid_volume_1", "bid_volume_2", "bid_volume_3"]
+    df[volume_cols_bid] = df[volume_cols_bid].fillna(0)
+    df["bid_book_size"] = df[volume_cols_bid].sum(axis=1)
+
+    plt.figure(figsize=(12, 6))
+    plt.plot(df["timestamp"], df["bid_book_size"], label="Bid Size")
+    plt.xlabel("Timestamp")
+    plt.ylabel("Orderbook Size")
+    plt.title(title)
+    plt.legend()
+    plt.show()
+
+def plot_orderbook_sell_size(
+        df: pd.DataFrame,
+        title: str = "",    
+    ):
+
+    volume_cols_ask = ["ask_volume_1", "ask_volume_2", "ask_volume_3"]
+    df[volume_cols_ask] = df[volume_cols_ask].fillna(0)
+    df["ask_book_size"] = df[volume_cols_ask].sum(axis=1)
+
+    plt.figure(figsize=(12, 6))
+    plt.plot(df["timestamp"], df["ask_book_size"], label="Ask Size")
+    plt.xlabel("Timestamp")
+    plt.ylabel("Orderbook Size")
+    plt.title(title)
+    plt.legend()
+    plt.show()
+
 '''
 COMPUTATION
 '''

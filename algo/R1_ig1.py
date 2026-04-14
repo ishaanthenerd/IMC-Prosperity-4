@@ -355,11 +355,12 @@ class Product():
         ...
 
 class RollingZ():
-    def __init__(self, z_th: float, window: int, fixed_mean: float = math.nan):
+    def __init__(self, z_th: float, window: int, fixed_mean: float = math.nan, fixed_std: float = math.nan):
         self.premiums = np.array([], dtype = float)
         self.z_th = z_th
         self.window = window
         self.fixed_mean = fixed_mean
+        self.fixed_std = fixed_std
 
     def add(self, new_val: float):
         self.premiums = np.append(self.premiums, new_val)
@@ -372,7 +373,7 @@ class RollingZ():
         return self.fixed_mean if not math.isnan(self.fixed_mean) else np.mean(self.premiums)
 
     def std(self):
-        return np.std(self.premiums)
+        return self.fixed_std if not math.isnan(self.fixed_std) else np.std(self.premiums)
     
     def most_recent(self):
         return self.premiums[-1]
@@ -382,12 +383,8 @@ class RollingZ():
         if np.std(self.premiums) == 0 or len(self.premiums) != self.window:
             return 0
         
-        z_score = 0
-        if math.isnan(self.fixed_mean):
-            z_score = (self.premiums[-1] - np.mean(self.premiums)) / np.std(self.premiums)
-        else:
-            z_score = (self.premiums[-1] - self.fixed_mean) / np.std(self.premiums)
-
+        z_score = (self.most_recent() - self.mean()) / self.std()
+        logger.print(f"z_score = {z_score}")
         if z_score < -self.z_th:
             return 1
         elif z_score > self.z_th:
@@ -399,15 +396,37 @@ class RollingZ():
 PRODUCT CLASSES
 '''
 
-class Root(Product):
+class AshCoatedOsmium(Product):
+    def __init__(self, symbol: str, limit: int, state: TradingState, 
+                 fixed_mean: float = math.nan, fixed_std: float = math.nan):
+        super().__init__(symbol, limit, state)
+        self.fixed_mean = fixed_mean
+        self.fixed_std = fixed_std
+        self.rolling_z = RollingZ(z_th = 1.5, window = 20, fixed_mean = fixed_mean, fixed_std = fixed_std)
+
+    def fair_val(self):
+        return self.fixed_mean
+    
+    def strategy(self):
+        # ellison's strat
+        self.market_make(self.fair_val() - self.fixed_std * 2, self.fair_val() + self.fixed_std * 2)
+
+class IntarianPepperRoot(Product):
     def __init__(self, symbol: str, limit: int, state: TradingState):
         super().__init__(symbol, limit, state)
 
     def fair_val(self):
-        return 12000 + self.timestamp / 1000
+        return self.mid_price_using_best()
     
     def strategy(self):
-        self.market_take(self.fair_val())
+        # strat gives ~240k in all
+        if self.timestamp <= 990000:
+            best = self.best_ask()
+            if not math.isnan(best) and best < 12015 and self.active_position() < self.limit:
+                buy_quantity = min(-self.order_depth.sell_orders[best], self.limit - self.active_position())
+                self.buy(best, buy_quantity, print=True)
+        elif self.timestamp > 990000 and not math.isnan(self.best_bid()) and self.active_position() > 0:
+            self.sell(self.best_bid(), self.active_position(), print=True)
 
 '''
 TRADING EXECUTION
@@ -426,7 +445,8 @@ class Trader:
 
         if not Trader.turned_on:
             # initiate the products / arbitrages
-            product_instances["INTARIAN_PEPPER_ROOT"] = Root("INTARIAN_PEPPER_ROOT", 100, state)
+            product_instances["ASH_COATED_OSMIUM"] = AshCoatedOsmium("ASH_COATED_OSMIUM", 80, state, 10000, 3)
+            # product_instances["INTARIAN_PEPPER_ROOT"] = IntarianPepperRoot("INTARIAN_PEPPER_ROOT", 80, state)
 
             # turn on the trading unit; the products have been populated!
             Trader.turned_on = True
