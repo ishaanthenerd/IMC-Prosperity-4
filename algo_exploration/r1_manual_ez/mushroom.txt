@@ -1,0 +1,8 @@
+Default volume is 86000
+15 trades 86000 total volume, 4999 volume for us, makes 24495.10 profit
+16 trades 91000 total volume, 19999 volume for us, makes 77996.10 profit
+17 trades 91000 total volume, 24999 volume for us, makes 72497.10 profit
+18 trades 101000 total volume, 40999 volume for us, makes 77898.10 profit
+19 trades 113000 total volume, 69999 volume for us, makes 62999.10 profit
+Best is 16 with 19999
+16 trades 91000 total volume, 19999 volume for us, makes 77996.10 profit

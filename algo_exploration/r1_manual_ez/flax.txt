@@ -1,0 +1,5 @@
+Default volume is 40000
+28 trades 40000 total volume, 4999 volume for us, makes 9998.00 profit
+29 trades 40000 total volume, 9999 volume for us, makes 9999.00 profit
+Best is 29 with 9999
+29 trades 40000 total volume, 9999 volume for us, makes 9999.00 profit

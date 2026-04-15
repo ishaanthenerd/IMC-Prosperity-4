@@ -2,6 +2,7 @@ import pandas as pd
 import numpy as np
 import string, json, math, statistics
 import matplotlib.pyplot as plt
+from io import StringIO
 
 '''
 DATA HANDLING
@@ -117,6 +118,48 @@ def plot_orderbook_sell_size(
     plt.title(title)
     plt.legend()
     plt.show()
+
+
+def extract_log_data(file_path: str) -> pd.DataFrame:
+    with open(file_path, 'r') as f:
+        log_data = json.loads(f.read().replace('\n', '\\n'))
+    csv_data = log_data['activitiesLog']
+    return pd.read_csv(StringIO(csv_data), sep=';')
+
+def plot_pnl(df: pd.DataFrame, title: str = "Profit and Loss"):
+    plt.figure(figsize=(12, 6))
+
+    def calculate_adjusted_r_squared(x, y):
+        n = len(x)
+        if n <= 2: return 0.0
+        coeffs = np.polyfit(x, y, 1)
+        p = np.poly1d(coeffs)
+        y_hat = p(x)
+        y_bar = np.mean(y)
+        ss_tot = np.sum((y - y_bar)**2)
+        ss_res = np.sum((y - y_hat)**2)
+        if ss_tot == 0: return 0.0
+        r_squared = 1 - (ss_res / ss_tot)
+        return 1 - (1 - r_squared) * (n - 1) / (n - 2)
+
+    # Plot total PnL
+    total_pnl = df.groupby('timestamp')['profit_and_loss'].sum().reset_index()
+    total_adj_r = calculate_adjusted_r_squared(total_pnl["timestamp"], total_pnl["profit_and_loss"])
+    print(f"Adjusted R^2 for Total PnL: {total_adj_r:.4f}")
+    plt.plot(total_pnl["timestamp"], total_pnl["profit_and_loss"], 
+             label=f"Total PnL (adj R^2: {total_adj_r:.4f})", linewidth=2, color='black')
+
+    # Plot PnL for each individual product
+    products = df['product'].unique()
+    for product in products:
+        product_df = df[df['product'] == product]
+        if not product_df.empty:
+            adj_r = calculate_adjusted_r_squared(product_df["timestamp"], product_df["profit_and_loss"])
+            print(f"Adjusted R^2 for {product}: {adj_r:.4f}")
+            plt.plot(product_df["timestamp"], product_df["profit_and_loss"], 
+                     label=f"{product} (adj R^2: {adj_r:.4f})", linewidth=1, alpha=0.7)
+    # ... grid, legend, show
+
 
 '''
 COMPUTATION
