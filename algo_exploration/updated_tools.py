@@ -40,7 +40,7 @@ def plot_df(
     ):
 
     plt.figure(figsize=(12, 6))
-    plt.plot(df[column1], df[column2], linewidth=1)
+    plt.plot(df[column1], df[column2], linewidth=1, label=f"{column2}")
     plt.title(title)
     plt.xlabel(column1)
     plt.ylabel(column2)
@@ -58,7 +58,7 @@ def plot_against_timestamp(
 
     plt.figure(figsize=(12, 6))
     for column in columns:
-        plt.plot(df["timestamp"], df[column], linewidth=1)
+        plt.plot(df["timestamp"], df[column], linewidth=1, label=f"{column}")
     plt.title(title)
     plt.xlabel("timestamp")
     plt.grid(True, alpha=0.3)
