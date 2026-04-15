@@ -46,6 +46,7 @@ def plot_df(
     plt.ylabel(column2)
     plt.grid(True, alpha=0.3)
     plt.tight_layout()
+    plt.legend()
     plt.show()
 
 # Plot a set of columns of a DataFrame against timestamp
@@ -62,6 +63,7 @@ def plot_against_timestamp(
     plt.xlabel("timestamp")
     plt.grid(True, alpha=0.3)
     plt.tight_layout()
+    plt.legend()
     plt.show()
 
 # Plot mid price + other prices against timestamp
@@ -129,19 +131,6 @@ def extract_log_data(file_path: str) -> pd.DataFrame:
 def plot_pnl(df: pd.DataFrame, title: str = "Profit and Loss"):
     plt.figure(figsize=(12, 6))
 
-    def calculate_adjusted_r_squared(x, y):
-        n = len(x)
-        if n <= 2: return 0.0
-        coeffs = np.polyfit(x, y, 1)
-        p = np.poly1d(coeffs)
-        y_hat = p(x)
-        y_bar = np.mean(y)
-        ss_tot = np.sum((y - y_bar)**2)
-        ss_res = np.sum((y - y_hat)**2)
-        if ss_tot == 0: return 0.0
-        r_squared = 1 - (ss_res / ss_tot)
-        return 1 - (1 - r_squared) * (n - 1) / (n - 2)
-
     # Plot total PnL
     total_pnl = df.groupby('timestamp')['profit_and_loss'].sum().reset_index()
     total_adj_r = calculate_adjusted_r_squared(total_pnl["timestamp"], total_pnl["profit_and_loss"])
@@ -159,7 +148,9 @@ def plot_pnl(df: pd.DataFrame, title: str = "Profit and Loss"):
             plt.plot(product_df["timestamp"], product_df["profit_and_loss"], 
                      label=f"{product} (adj R^2: {adj_r:.4f})", linewidth=1, alpha=0.7)
     # ... grid, legend, show
-
+    plt.title(title)
+    plt.legend()
+    plt.show()
 
 '''
 COMPUTATION
@@ -183,3 +174,17 @@ def auto_correlation(
     x = tmp[column2]
     y = tmp[column2].shift(lag)
     return x.corr(y)
+
+# Calculate adjusted R^2
+def calculate_adjusted_r_squared(x, y):
+    n = len(x)
+    if n <= 2: return 0.0
+    coeffs = np.polyfit(x, y, 1)
+    p = np.poly1d(coeffs)
+    y_hat = p(x)
+    y_bar = np.mean(y)
+    ss_tot = np.sum((y - y_bar)**2)
+    ss_res = np.sum((y - y_hat)**2)
+    if ss_tot == 0: return 0.0
+    r_squared = 1 - (ss_res / ss_tot)
+    return 1 - (1 - r_squared) * (n - 1) / (n - 2)

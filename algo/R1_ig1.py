@@ -408,7 +408,7 @@ class AshCoatedOsmium(Product):
     
     def strategy(self):
         self.market_take(self.fair_val())
-        self.mm_undercut(self.fair_val(), 7)
+        self.mm_undercut_balanced(self.fair_val(), 7)
 
 class IntarianPepperRoot(Product):
     def __init__(self, symbol: str, limit: int, state: TradingState):
@@ -424,8 +424,10 @@ class IntarianPepperRoot(Product):
             if not math.isnan(best) and best < 12015 and self.active_position() < self.limit:
                 buy_quantity = min(-self.order_depth.sell_orders[best], self.limit - self.active_position())
                 self.buy(best, buy_quantity, print=True)
-        elif self.timestamp > 990000 and not math.isnan(self.best_bid()) and self.active_position() > 0:
-            self.sell(self.best_bid(), self.active_position(), print=True)
+        elif self.timestamp > 990000:
+            logger.print("suisei")
+            if not math.isnan(self.best_bid()) and self.active_position() > 0:
+                self.sell(self.best_bid(), self.active_position(), print=True)
 
 '''
 TRADING EXECUTION
