@@ -11,6 +11,12 @@ export interface ProductPriceChartProps {
   symbol: ProsperitySymbol;
 }
 
+/** Trade plus timeline x: merged multi-day logs shift `state.timestamp` but embedded trade rows often keep per-day `trade.timestamp`. */
+interface TradeStamped {
+  trade: Trade;
+  plotTs: number;
+}
+
 const STORAGE_KEY = 'imc-prosperity-3-viz-trade-point-cap';
 
 function tradeVolume(point: Highcharts.Point): number {
@@ -40,11 +46,11 @@ function evenSample<T>(sorted: T[], max: number): T[] {
   return out;
 }
 
-function toScatterPoint(t: Trade) {
+function toScatterPoint(st: TradeStamped): Highcharts.PointOptionsType {
   return {
-    x: t.timestamp,
-    y: t.price,
-    custom: { volume: t.quantity },
+    x: st.plotTs,
+    y: st.trade.price,
+    custom: { volume: st.trade.quantity },
   };
 }
 
@@ -53,6 +59,7 @@ function scatterSeries(
   color: string,
   label: string,
   data: Highcharts.PointOptionsType[],
+  markerSymbol: string = 'circle',
 ): Highcharts.SeriesOptionsType {
   return {
     type: 'scatter',
@@ -60,7 +67,7 @@ function scatterSeries(
     color,
     dataGrouping: { enabled: false },
     marker: {
-      symbol: 'circle',
+      symbol: markerSymbol,
       radius: 5,
       lineWidth: 1,
       lineColor: '#ffffff',
@@ -126,26 +133,24 @@ export function ProductPriceChart({ symbol }: ProductPriceChartProps): ReactNode
       }
     }
 
-    const ownBuy: Trade[] = [];
-    const ownSell: Trade[] = [];
-    const botBuy: Trade[] = [];
-    const botSell: Trade[] = [];
+    const ownBuy: TradeStamped[] = [];
+    const ownSell: TradeStamped[] = [];
+    const botBuy: TradeStamped[] = [];
+    const botSell: TradeStamped[] = [];
+
+    const stamp = (trade: Trade, plotTs: number): TradeStamped => ({ trade, plotTs });
 
     for (const row of algorithm.data) {
+      const plotTs = row.state.timestamp;
       const own = row.state.ownTrades[symbol];
       if (own) {
         for (const t of own) {
+          // Match merged backtest Trade History: only classify by SUBMISSION side (buyer = our buy, seller = our sell).
+          // Do not infer from price vs mid — that mislabels fills when both counterparties are blank or the book moved.
           if (isSubmission(t.buyer)) {
-            ownBuy.push(t);
+            ownBuy.push(stamp(t, plotTs));
           } else if (isSubmission(t.seller)) {
-            ownSell.push(t);
-          } else {
-            const mid = midByTs.get(t.timestamp);
-            if (mid != null && Number.isFinite(mid) && t.price >= mid) {
-              ownBuy.push(t);
-            } else {
-              ownSell.push(t);
-            }
+            ownSell.push(stamp(t, plotTs));
           }
         }
       }
@@ -155,17 +160,18 @@ export function ProductPriceChart({ symbol }: ProductPriceChartProps): ReactNode
           if (isSubmission(t.buyer) || isSubmission(t.seller)) {
             continue;
           }
-          const mid = midByTs.get(t.timestamp);
+          const mid = midByTs.get(plotTs);
           if (mid != null && Number.isFinite(mid) && t.price >= mid) {
-            botBuy.push(t);
+            botBuy.push(stamp(t, plotTs));
           } else {
-            botSell.push(t);
+            botSell.push(stamp(t, plotTs));
           }
         }
       }
     }
 
-    const cmp = (a: Trade, b: Trade) => a.timestamp - b.timestamp;
+    const cmp = (a: TradeStamped, b: TradeStamped): number =>
+      a.plotTs - b.plotTs || a.trade.timestamp - b.trade.timestamp;
     ownBuy.sort(cmp);
     ownSell.sort(cmp);
     botBuy.sort(cmp);
@@ -179,8 +185,8 @@ export function ProductPriceChart({ symbol }: ProductPriceChartProps): ReactNode
 
     return [
       ...lineSeries,
-      scatterSeries('Own (buy filled)', '#e03131', 'Own Trade (buy)', ownBuyPts),
-      scatterSeries('Own (sell filled)', '#2f9e44', 'Own Trade (sell)', ownSellPts),
+      scatterSeries('Own (buy filled)', '#2ca02c', 'Own Trade (buy)', ownBuyPts, 'triangle'),
+      scatterSeries('Own (sell filled)', '#d62728', 'Own Trade (sell)', ownSellPts, 'triangle-down'),
       scatterSeries('Bot (buy filled)', '#ff8787', 'bot trade (buy)', botBuyPts),
       scatterSeries('Bot (sell filled)', '#8ce99a', 'bot trade (sell)', botSellPts),
     ];
