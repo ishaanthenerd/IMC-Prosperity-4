@@ -399,17 +399,14 @@ PRODUCT CLASSES
 class AshCoatedOsmium(Product):
     def __init__(self, symbol: str, limit: int, state: TradingState):
         super().__init__(symbol, limit, state)
-        self.recent = math.nan # keeps track of prior mid
 
     def fair_val(self):
-        if not math.isnan(self.mid_price_using_best()):
-            self.recent = self.mid_price_using_best()
-        return self.recent if not math.isnan(self.recent) else 10000
+        pass
     
     def strategy(self):
         logger.print(f"position: {self.position}")
-        self.market_take(self.fair_val())
-        self.mm_undercut_balanced(self.fair_val(), 7)
+        if not math.isnan(self.best_bid()) and not math.isnan(self.best_ask()):
+            self.market_make(self.best_bid() + 1, self.best_ask() - 1)
 
 class IntarianPepperRoot(Product):
     def __init__(self, symbol: str, limit: int, state: TradingState):
