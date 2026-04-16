@@ -1,8 +1,14 @@
-import { Center, Container, Grid, Title } from '@mantine/core';
+import { Center, Container, Grid, Stack, Table, Title } from '@mantine/core';
 import { ReactNode } from 'react';
 import { Navigate, useLocation } from 'react-router-dom';
 import { useStore } from '../../store.ts';
 import { formatNumber } from '../../utils/format.ts';
+import {
+  formatSharpeRatio,
+  periodPnLByTimestamps,
+  sharpeFromPeriodPnL,
+  sortedActivityTimestamps,
+} from '../../utils/sharpe.ts';
 import { AlgorithmSummaryCard } from './AlgorithmSummaryCard.tsx';
 import { ConversionPriceChart } from './ConversionPriceChart.tsx';
 import { EnvironmentChart } from './EnvironmentChart.tsx';
@@ -54,6 +60,26 @@ export function VisualizerPage(): ReactNode {
 
   const sortedSymbols = [...symbols].sort((a, b) => a.localeCompare(b));
   const sortedPlainValueObservationSymbols = [...plainValueObservationSymbols].sort((a, b) => a.localeCompare(b));
+
+  const activityTimestamps = sortedActivityTimestamps(algorithm.activityLogs);
+  const overallPeriodPnL = periodPnLByTimestamps(algorithm.activityLogs, activityTimestamps, 'total');
+  const finalSharpeRatio = sharpeFromPeriodPnL(overallPeriodPnL);
+
+  const sharpeRows: ReactNode[] = [
+    <Table.Tr key="overall">
+      <Table.Td>Overall</Table.Td>
+      <Table.Td>{formatSharpeRatio(finalSharpeRatio)}</Table.Td>
+    </Table.Tr>,
+  ];
+  for (const symbol of sortedSymbols) {
+    const s = sharpeFromPeriodPnL(periodPnLByTimestamps(algorithm.activityLogs, activityTimestamps, symbol));
+    sharpeRows.push(
+      <Table.Tr key={symbol}>
+        <Table.Td>{symbol}</Table.Td>
+        <Table.Td>{formatSharpeRatio(s)}</Table.Td>
+      </Table.Tr>,
+    );
+  }
 
   const symbolColumns: ReactNode[] = [];
   sortedSymbols.forEach(symbol => {
@@ -108,8 +134,26 @@ export function VisualizerPage(): ReactNode {
         <Grid.Col span={12}>
           <VisualizerCard>
             <Center>
-              <Title order={2}>Final Profit / Loss: {formatNumber(profitLoss)}</Title>
+              <Stack gap="xs" align="center">
+                <Title order={2}>Final Profit / Loss: {formatNumber(profitLoss)}</Title>
+                <Title order={2}>Final Sharpe Ratio: {formatSharpeRatio(finalSharpeRatio)}</Title>
+              </Stack>
             </Center>
+          </VisualizerCard>
+        </Grid.Col>
+        <Grid.Col span={12}>
+          <VisualizerCard title="Sharpe ratio (per timestamp PnL)">
+            <Table.ScrollContainer minWidth={300}>
+              <Table withColumnBorders horizontalSpacing={8} verticalSpacing={4}>
+                <Table.Thead>
+                  <Table.Tr>
+                    <Table.Th>Product</Table.Th>
+                    <Table.Th>Sharpe ratio</Table.Th>
+                  </Table.Tr>
+                </Table.Thead>
+                <Table.Tbody>{sharpeRows}</Table.Tbody>
+              </Table>
+            </Table.ScrollContainer>
           </VisualizerCard>
         </Grid.Col>
         <Grid.Col span={{ xs: 12, sm: 6 }}>
