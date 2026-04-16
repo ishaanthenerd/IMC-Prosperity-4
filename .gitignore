@@ -4,3 +4,6 @@ myenv/
 
 backtests/
 __pycache__/
+visualizer/node_modules/
+# Local editable-install artifact (use vendor/imc-prosperity-4-backtester)
+backtester/
