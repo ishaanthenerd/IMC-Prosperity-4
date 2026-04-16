@@ -39,8 +39,11 @@ export function VisualizerPage(): ReactNode {
 
   let profitLoss = 0;
   const lastTimestamp = algorithm.activityLogs[algorithm.activityLogs.length - 1].timestamp;
+  const finalPnLByProduct = new Map<string, number>();
   for (let i = algorithm.activityLogs.length - 1; i >= 0 && algorithm.activityLogs[i].timestamp == lastTimestamp; i--) {
-    profitLoss += algorithm.activityLogs[i].profitLoss;
+    const row = algorithm.activityLogs[i];
+    profitLoss += row.profitLoss;
+    finalPnLByProduct.set(row.product, (finalPnLByProduct.get(row.product) ?? 0) + row.profitLoss);
   }
 
   const symbols = new Set<string>();
@@ -65,18 +68,20 @@ export function VisualizerPage(): ReactNode {
   const overallPeriodPnL = periodPnLByTimestamps(algorithm.activityLogs, activityTimestamps, 'total');
   const finalSharpeRatio = sharpeFromPeriodPnL(overallPeriodPnL);
 
-  const sharpeRows: ReactNode[] = [
+  const byProductRows: ReactNode[] = [
     <Table.Tr key="overall">
       <Table.Td>Overall</Table.Td>
       <Table.Td>{formatSharpeRatio(finalSharpeRatio)}</Table.Td>
+      <Table.Td>{formatNumber(profitLoss)}</Table.Td>
     </Table.Tr>,
   ];
   for (const symbol of sortedSymbols) {
     const s = sharpeFromPeriodPnL(periodPnLByTimestamps(algorithm.activityLogs, activityTimestamps, symbol));
-    sharpeRows.push(
+    byProductRows.push(
       <Table.Tr key={symbol}>
         <Table.Td>{symbol}</Table.Td>
         <Table.Td>{formatSharpeRatio(s)}</Table.Td>
+        <Table.Td>{formatNumber(finalPnLByProduct.get(symbol) ?? 0)}</Table.Td>
       </Table.Tr>,
     );
   }
@@ -142,16 +147,17 @@ export function VisualizerPage(): ReactNode {
           </VisualizerCard>
         </Grid.Col>
         <Grid.Col span={12}>
-          <VisualizerCard title="Sharpe ratio (per timestamp PnL)">
+          <VisualizerCard title="By Product">
             <Table.ScrollContainer minWidth={300}>
               <Table withColumnBorders horizontalSpacing={8} verticalSpacing={4}>
                 <Table.Thead>
                   <Table.Tr>
                     <Table.Th>Product</Table.Th>
                     <Table.Th>Sharpe ratio</Table.Th>
+                    <Table.Th>Profit / loss</Table.Th>
                   </Table.Tr>
                 </Table.Thead>
-                <Table.Tbody>{sharpeRows}</Table.Tbody>
+                <Table.Tbody>{byProductRows}</Table.Tbody>
               </Table>
             </Table.ScrollContainer>
           </VisualizerCard>
