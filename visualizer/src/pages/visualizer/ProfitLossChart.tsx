@@ -19,11 +19,13 @@ export function ProfitLossChart({ symbols }: ProfitLossChartProps): ReactNode {
     }
   }
 
+  const sortedTimestamps = [...dataByTimestamp.keys()].sort((a, b) => a - b);
+
   const series: Highcharts.SeriesOptionsType[] = [
     {
       type: 'line',
       name: 'Total',
-      data: [...dataByTimestamp.keys()].map(timestamp => [timestamp, dataByTimestamp.get(timestamp)]),
+      data: sortedTimestamps.map(timestamp => [timestamp, dataByTimestamp.get(timestamp)]),
     },
   ];
 

@@ -61,11 +61,14 @@ export function Chart({ title, options, series, min, max }: ChartProps): ReactNo
         animation: false,
         height: 400,
         zooming: {
-          type: 'x',
+          type: 'xy',
+          mouseWheel: {
+            type: 'xy',
+          },
         },
         panning: {
           enabled: true,
-          type: 'x',
+          type: 'xy',
         },
         panKey: 'shift',
         numberFormatter: formatNumber,
@@ -106,23 +109,12 @@ export function Chart({ title, options, series, min, max }: ChartProps): ReactNo
         },
         series: {
           dataGrouping: {
-            approximation(this: any, values: number[]): number {
-              const endIndex = this.dataGroupInfo.start + this.dataGroupInfo.length;
-              if (endIndex < this.xData.length) {
-                return values[0];
-              } else {
-                return values[values.length - 1];
-              }
-            },
-            anchor: 'start',
-            firstAnchor: 'firstPoint',
-            lastAnchor: 'lastPoint',
-            units: [['second', [1, 2, 5, 10]]],
+            enabled: false,
           },
         },
       },
       xAxis: {
-        type: 'datetime',
+        type: 'linear',
         title: {
           text: 'Timestamp',
         },
