@@ -442,7 +442,7 @@ class Trader:
 
         if not Trader.turned_on:
             # initiate the products / arbitrages
-            product_instances["ASH_COATED_OSMIUM"] = AshCoatedOsmium("ASH_COATED_OSMIUM", 80, state)
+            # product_instances["ASH_COATED_OSMIUM"] = AshCoatedOsmium("ASH_COATED_OSMIUM", 80, state)
             product_instances["INTARIAN_PEPPER_ROOT"] = IntarianPepperRoot("INTARIAN_PEPPER_ROOT", 80, state)
 
             # turn on the trading unit; the products have been populated!
