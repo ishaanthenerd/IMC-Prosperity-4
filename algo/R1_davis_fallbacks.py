@@ -105,7 +105,9 @@ def fair_mid(depth: OrderDepth) -> float:
 
 def _ash_fair_and_mids(state: TradingState, td: dict[str, Any]) -> tuple[int, list[float]]:
     mids: list[float] = list(td.get("mids", []))
-    ash_depth = state.order_depths[ASH_COATED_OSMIUM]
+    ash_depth = state.order_depths.get(ASH_COATED_OSMIUM, None)
+    if ash_depth is None:
+        return 0, mids
     ash_mid = _mid_price_using_best(ash_depth)
     if DAVIS_FAIR_MA_WINDOW <= 0:
         ash_fair = int(round(ash_mid)) if not math.isnan(ash_mid) else FAIR_FALLBACK
