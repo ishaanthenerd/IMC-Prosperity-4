@@ -684,6 +684,8 @@ class Trader:
         depth = state.order_depths[ASH_COATED_OSMIUM]
         pos = state.position.get(ASH_COATED_OSMIUM, 0)
         orders: list[Order] = []
+        if fair_value == 0:
+            return orders
 
         best_bid = max(depth.buy_orders.keys()) if depth.buy_orders else None
         best_ask = min(depth.sell_orders.keys()) if depth.sell_orders else None
