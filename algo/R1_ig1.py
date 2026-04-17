@@ -413,13 +413,22 @@ class AshCoatedOsmium(Product):
 class IntarianPepperRoot(Product):
     def __init__(self, symbol: str, limit: int, state: TradingState):
         super().__init__(symbol, limit, state)
+        self.recent_ask = math.nan
 
     def fair_val(self):
         return self.mid_price_using_best()
     
     def strategy(self):
         if self.timestamp <= 990000:
-            self.full_buy(self.max_buy_orders())
+            if math.isnan(self.recent_ask):
+                if not math.isnan(self.best_ask()):
+                    self.buy(self.best_ask(), -self.order_depth.sell_orders[self.best_ask()])
+                self.recent_ask = self.best_ask()
+            else:
+                if (not math.isnan(self.best_ask())) and (self.best_ask() - self.recent_ask < 3):
+                    quantity = min(self.limit_buy_orders(), -self.order_depth.sell_orders[self.best_ask()])
+                    self.buy(self.best_ask(), quantity)
+                self.recent_ask = self.best_ask() if (not math.isnan(self.best_ask())) else self.recent_ask
         elif self.timestamp > 990000:
             logger.print("suisei")
             if not math.isnan(self.best_bid()) and self.active_position() > 0:
