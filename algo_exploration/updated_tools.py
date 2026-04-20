@@ -121,7 +121,6 @@ def plot_orderbook_sell_size(
     plt.legend()
     plt.show()
 
-
 def extract_log_data(file_path: str) -> pd.DataFrame:
     with open(file_path, 'r') as f:
         log_data = json.loads(f.read().replace('\n', '\\n'))
@@ -151,6 +150,19 @@ def plot_pnl(df: pd.DataFrame, title: str = "Profit and Loss"):
     plt.title(title)
     plt.legend()
     plt.show()
+
+def plot_autocorrelation(
+        df: pd.DataFrame,
+        max_lag: int,
+    ):
+    
+    autocorrs = [auto_correlation(df, "timestamp", "mid_price", lag) for lag in range(1, max_lag + 1)]
+    plt.plot(list(range(1, max_lag + 1)), autocorrs)
+    # plt.xlabel("Lag")
+    # plt.ylabel("Autocorrelation")
+    # plt.title("Autocorrelation of mid_price")
+    # plt.grid(True)
+    # plt.show() --> uncomment if needed
 
 '''
 COMPUTATION
