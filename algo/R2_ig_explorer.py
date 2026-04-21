@@ -255,22 +255,24 @@ class Product():
     # methods to buy / sell everything
     def full_buy(self, quantity: int):
         q = quantity
-        for price, volume in self.order_depth.sell_orders.items():
-            if volume < 0:
-                buy_vol = min(q, min(self.limit_buy_orders(), -volume))
-                self.buy(price, buy_vol)
-                q -= buy_vol
-                if q <= 0 or self.limit_buy_orders() <= 0:
-                    break
+        for price in sorted(self.order_depth.sell_orders.keys()):
+            if q == 0:
+                break
+            available = -self.order_depth.sell_orders[price]
+            buy_quantity = min(self.max_buy_orders(), available)
+            if buy_quantity > 0:
+                self.buy(price, buy_quantity)
+                q -= buy_quantity
     def full_sell(self, quantity: int):
         q = quantity
-        for price, volume in self.order_depth.buy_orders.items():
-            if volume > 0:
-                sell_vol = min(q, min(self.limit_sell_orders(), volume))
-                self.sell(price, sell_vol)
-                q -= sell_vol
-                if q <= 0 or self.limit_sell_orders() <= 0:
-                    break
+        for price in sorted(self.order_depth.buy_orders.keys(), reverse = True):
+            if q == 0:
+                break
+            available = self.order_depth.buy_orders[price]
+            sell_quantity = min(q, available)
+            if sell_quantity > 0:
+                self.sell(price, sell_quantity)
+                q -= sell_quantity
     
     # cancel all orders, all / buy / sell
     def cancel_orders(self):
@@ -289,93 +291,63 @@ class Product():
     '''
     SECTION 3 - Strategies
     '''
-    # balance position back to zero using market participants' prices
-    def market_take(self, fair_val: float, edge: float = 0):
-        bid_val = fair_val - edge
-        ask_val = fair_val + edge
-
-        for bid_price, bid_vol in self.order_depth.buy_orders.items():
-            if bid_price > ask_val or (bid_price == ask_val and self.active_position() > 0): 
-                sell_vol = min(self.max_sell_orders(), bid_vol)
-                if bid_price == ask_val:
-                    sell_vol = min(sell_vol, self.active_position())
-                if sell_vol > 0:
-                    self.sell(bid_price, sell_vol)
-
-        for ask_price, ask_vol in self.order_depth.sell_orders.items():
-            ask_vol *= -1
-            if ask_price < bid_val or (ask_price == bid_val and self.active_position() < 0):
-                buy_vol = min(self.max_buy_orders(), ask_vol)
-                if ask_price == bid_val:
-                    buy_vol = min(buy_vol, -self.active_position())
-                if buy_vol > 0:
-                    self.buy(ask_price, buy_vol)
-
-    # places a bid / ask like normal
-    def market_make(
-        self,
-        buy_price: int,
-        sell_price: int
-    ):
-        self.buy(buy_price, self.max_buy_orders())
-        self.sell(sell_price, self.max_sell_orders())
     
-    # market-making under the condition of starting at [fv - edge, fv + edge] and expanding outwards
-    def mm_undercut(
+    def take(
         self,
         fair_val: int,
         edge: float = 0,
     ):
-        mm_buy = max([bid for bid in self.order_depth.buy_orders.keys() if bid < fair_val - edge], default=fair_val - edge - 1) + 1
-        mm_sell = min([ask for ask in self.order_depth.sell_orders.keys() if ask > fair_val + edge], default=fair_val + edge + 1) - 1
-        self.market_make(mm_buy, mm_sell)
-
-    # same as mm_undercut but also try to move position towards zero if position != 0
-    def mm_undercut_balanced(
-        self,
-        fair_val: int,
-        edge: float = 0,
-    ):
-        mm_buy = max([bid for bid in self.order_depth.buy_orders.keys() if bid < fair_val - edge], default = fair_val - edge - 1) + 1
-        mm_sell = min([ask for ask in self.order_depth.sell_orders.keys() if ask > fair_val + edge], default = fair_val + edge + 1) - 1
-        if not (self.active_position() > 0 and mm_buy >= self.best_bid()):
-            self.buy(mm_buy, self.max_buy_orders())
-        if not (self.active_position() < 0 and mm_sell <= self.best_ask()):
-            self.sell(mm_sell, self.max_sell_orders())
-
-    def take_clear_make(
-        self,
-        fair_val: int,
-        edge: float = 0
-    ):
-        # phase 1: take
         for price in sorted(self.order_depth.sell_orders.keys()):
-            if price >= fair_val:
+            if price >= fair_val - edge:
                 break
             available = -self.order_depth.sell_orders[price]
-            quantity = min(self.limit_buy_orders(), available)
+            quantity = min(self.max_buy_orders(), available)
             if quantity > 0:
                 self.buy(price, quantity)
         
         for price in sorted(self.order_depth.buy_orders.keys(), reverse = True):
-            if price <= fair_val:
+            if price <= fair_val + edge:
                 break
             available = self.order_depth.buy_orders[price]
-            quantity = min(self.limit_sell_orders(), available)
+            quantity = min(self.max_sell_orders(), available)
             if quantity > 0:
                 self.sell(price, quantity)
 
-        # phase 2: clear
+    def clear(
+        self,
+        fair_val: int,
+    ):
         if self.active_position() > 0:
             self.sell(fair_val, self.active_position())
         elif self.active_position() < 0:
             self.buy(fair_val, -self.active_position())
 
-        # phase 3: make
-        if self.max_buy_orders() > 0:
+    def make(
+        self,
+        fair_val: int,
+        edge: float,
+    ):
+        self.buy(fair_val - edge, self.max_buy_orders())
+        self.sell(fair_val + edge, self.max_sell_orders())
+
+    def make_balanced(
+        self,
+        fair_val: int,
+        edge: float,
+    ):
+        if not (self.active_position() > 0 and fair_val - edge >= self.best_bid()):
             self.buy(fair_val - edge, self.max_buy_orders())
-        if self.max_sell_orders() > 0:
+        if not (self.active_position() < 0 and fair_val + edge <= self.best_ask()):
             self.sell(fair_val + edge, self.max_sell_orders())
+
+    def take_clear_make(
+        self,
+        fair_val: int,
+        edge: float = 0,
+    ):
+        self.take(fair_val, edge)
+        self.clear(fair_val)
+        self.make(fair_val, edge)
     
     '''
     SECTION 4 - Non-Implemented Strategies (runtime polymorphism)
@@ -443,9 +415,15 @@ class AshCoatedOsmium(Product):
         return self.fixed_mean
     
     def strategy(self):
-        if math.isnan(self.fair_val()):
+        if math.isnan(self.best_bid()) or math.isnan(self.best_ask()):
             return
-        self.take_clear_make(self.fair_val(), 2 * self.fixed_std)
+
+        # this strat makes ~18k
+        making_th = 8 # pick this empirically
+        bid = min(self.mid_price_using_best() - making_th, self.best_bid() + 1)
+        ask = max(self.mid_price_using_best() + making_th, self.best_ask() - 1)
+        self.make((bid + ask) / 2, (ask - bid) / 2)
+        self.take_clear_make(self.fixed_mean, 2 * self.fixed_std)
 
 class IntarianPepperRoot(Product):
     def __init__(self, symbol: str, limit: int, state: TradingState):
@@ -465,7 +443,7 @@ class IntarianPepperRoot(Product):
 TRADING EXECUTION
 '''
 
-product_instances = {}
+product_instances = []
 
 class Trader:
     # indicates if product_instances has been filled
@@ -478,22 +456,22 @@ class Trader:
 
         if not Trader.turned_on:
             # initiate the products / arbitrages
-            product_instances["ASH_COATED_OSMIUM"] = AshCoatedOsmium("ASH_COATED_OSMIUM", 80, state, 10000, 5)
-            product_instances["INTARIAN_PEPPER_ROOT"] = IntarianPepperRoot("INTARIAN_PEPPER_ROOT", 80, state)
+            # product_instances.append(AshCoatedOsmium("ASH_COATED_OSMIUM", 80, state, 10000, 5))
+            product_instances.append(IntarianPepperRoot("INTARIAN_PEPPER_ROOT", 80, state))
 
             # turn on the trading unit; the products have been populated!
             Trader.turned_on = True
         else:
             # reset ALL the states (can help if multiple product states are entangled)
-            for product, instance in product_instances.items():
+            for instance in product_instances:
                 instance.reset_state(state)
 
         # after ALL instantiating or resetting is done, then execute strategies
-        for product, instance in product_instances.items():
+        for instance in product_instances:
             if isinstance(instance, Product):
                 instance.strategy()
-                result[product] = instance.orders
-                logger.print("Orders for ", product, ": ", instance.orders)
+                result[instance.product] = instance.orders
+                logger.print("Orders for ", instance.product, ": ", instance.orders)
 
         conversions = 0
         logger.flush(state, result, conversions, traderData)
