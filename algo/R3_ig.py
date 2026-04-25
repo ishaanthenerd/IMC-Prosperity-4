@@ -390,7 +390,7 @@ class RollingZ():
 
     # 1 means buy, 0 means do nothing, -1 means sell (sign indicates position direction)
     def signal(self):
-        if np.std(self.premiums) == 0 or len(self.premiums) != self.window:
+        if len(self.premiums) != self.window or np.std(self.premiums) == 0:
             return 0
         
         z_score = (self.most_recent() - self.mean()) / self.std()
@@ -670,10 +670,17 @@ class IVScalperOption(Product):
         self.strike = strike
         self.tte = tte # time to expiry in years
         self.underlying = underlying
+        self.theos = RollingZ(1, 1000)
 
+        # with filtering
         self.a = 0.12828680415426924
         self.b = 0.006339066632356327
         self.c = 0.2723988924431878
+
+        # without filtering
+        # self.a = 0.06422522746659134
+        # self.b = -0.10814309837562446
+        # self.c = 0.2363099052068178
     
     def update_tte(self, new_tte: float):
         self.tte = new_tte
@@ -686,7 +693,18 @@ class IVScalperOption(Product):
         return BlackScholes.black_scholes_call(self.underlying.mid_price_using_best(), self.strike, self.tte, self.implied_volatility())
     
     def strategy(self):
-        self.make(self.fair_val(), 0.1)
+        fv = self.fair_val()
+        self.theos.add(fv)
+        signal = self.theos.signal()
+        if signal == -1:
+            logger.print(f"product = {self.product}")
+            logger.print(f"self.theos.mean() = {self.theos.mean()}, self.theos.most_recent() = {self.theos.most_recent()}")
+            self.sell(int(ceil(fv + 0.1)), self.max_sell_orders())
+        elif signal == 1:
+            logger.print(f"product = {self.product}")
+            logger.print(f"self.theos.mean() = {self.theos.mean()}, self.theos.most_recent() = {self.theos.most_recent()}")
+            self.buy(int(floor(fv - 0.1)), self.max_buy_orders())
+        
 
 '''
 PRODUCT CLASSES
@@ -700,7 +718,7 @@ class VelvetFruitExtract(Product):
         return self.mid_price_using_best()
     
     def strategy(self):
-        self.take_clear_make(self.fair_val(), 3)
+        pass # self.take_clear_make(self.fair_val(), 3)
 
 class VEV(IVScalperOption):
     def __init__(self, symbol: str, limit: int, state: TradingState, 
@@ -753,7 +771,7 @@ class Trader:
                     "VEV_" + str(st), 300, state, True,
                     st, cur_tte, product_instances[0]
                 ))
-            product_instances.append(Hydrogel("HYDROGEL_PACK", 200, state))
+            # product_instances.append(Hydrogel("HYDROGEL_PACK", 200, state))
 
             # turn on the trading unit; the products have been populated!
             Trader.turned_on = True
