@@ -902,23 +902,23 @@ class Trader:
             # product_instances["SQUID_INK"] = SquidInk("SQUID_INK", 50, state)
 
             # DAY 2
-            product_instances["CROISSANTS"] = Croissant("CROISSANTS", 250, state)
-            product_instances["JAMS"] = Jam("JAMS", 350, state)
-            product_instances["DJEMBES"] = Djembe("DJEMBES", 60, state)
-            product_instances["PICNIC_BASKET1"] = Basket1("PICNIC_BASKET1", 60, state)
-            product_instances["PICNIC_BASKET2"] = Basket2("PICNIC_BASKET2", 100, state)
+            # product_instances["CROISSANTS"] = Croissant("CROISSANTS", 250, state)
+            # product_instances["JAMS"] = Jam("JAMS", 350, state)
+            # product_instances["DJEMBES"] = Djembe("DJEMBES", 60, state)
+            # product_instances["PICNIC_BASKET1"] = Basket1("PICNIC_BASKET1", 60, state)
+            # product_instances["PICNIC_BASKET2"] = Basket2("PICNIC_BASKET2", 100, state)
             
-            product_instances["PB1_WITH_PB2"] = Arbitrage(
-                "PB1_WITH_PB2", 1000000000, state,
-                [product_instances["PICNIC_BASKET1"]],
-                [1],
-                [product_instances["PICNIC_BASKET2"], 
-                 product_instances["CROISSANTS"], 
-                 product_instances["JAMS"], 
-                 product_instances["DJEMBES"]],
-                [1, 2, 1, 1],
-                3.6, 100
-            )
+            # product_instances["PB1_WITH_PB2"] = Arbitrage(
+            #     "PB1_WITH_PB2", 1000000000, state,
+            #     [product_instances["PICNIC_BASKET1"]],
+            #     [1],
+            #     [product_instances["PICNIC_BASKET2"], 
+            #      product_instances["CROISSANTS"], 
+            #      product_instances["JAMS"], 
+            #      product_instances["DJEMBES"]],
+            #     [1, 2, 1, 1],
+            #     3.6, 100
+            # )
 
             # OLD CODE
             # product_instances["ARBITRAGE_1"] = Arbitrage(
@@ -939,12 +939,12 @@ class Trader:
             # )
 
             # DAY 3
-            # product_instances["VOLCANIC_ROCK"] = Rock("VOLCANIC_ROCK", 400, state)
-            # product_instances["VOLCANIC_ROCK_VOUCHER_9500"]  = RockVoucher("VOLCANIC_ROCK_VOUCHER_9500",  200, state, True, 9500,  cur_tte, product_instances["VOLCANIC_ROCK"], 20, 1000, 20, 20, 20, 10)
-            # product_instances["VOLCANIC_ROCK_VOUCHER_9750"]  = RockVoucher("VOLCANIC_ROCK_VOUCHER_9750",  200, state, True, 9750,  cur_tte, product_instances["VOLCANIC_ROCK"], 20, 1000, 20, 20, 20, 10)
-            # product_instances["VOLCANIC_ROCK_VOUCHER_10000"] = RockVoucher("VOLCANIC_ROCK_VOUCHER_10000", 200, state, True, 10000, cur_tte, product_instances["VOLCANIC_ROCK"], 20, 1000, 20, 20, 20, 10)
-            # product_instances["VOLCANIC_ROCK_VOUCHER_10250"] = RockVoucher("VOLCANIC_ROCK_VOUCHER_10250", 200, state, True, 10250, cur_tte, product_instances["VOLCANIC_ROCK"], 20, 1000, 20, 20, 20, 10)
-            # product_instances["VOLCANIC_ROCK_VOUCHER_10500"] = RockVoucher("VOLCANIC_ROCK_VOUCHER_10500", 200, state, True, 10500, cur_tte, product_instances["VOLCANIC_ROCK"], 20, 1000, 20, 20, 20, 10)
+            product_instances["VOLCANIC_ROCK"] = Rock("VOLCANIC_ROCK", 400, state)
+            product_instances["VOLCANIC_ROCK_VOUCHER_9500"]  = RockVoucher("VOLCANIC_ROCK_VOUCHER_9500",  200, state, True, 9500,  cur_tte, product_instances["VOLCANIC_ROCK"], 20, 1000, 20, 20, 20, 10)
+            product_instances["VOLCANIC_ROCK_VOUCHER_9750"]  = RockVoucher("VOLCANIC_ROCK_VOUCHER_9750",  200, state, True, 9750,  cur_tte, product_instances["VOLCANIC_ROCK"], 20, 1000, 20, 20, 20, 10)
+            product_instances["VOLCANIC_ROCK_VOUCHER_10000"] = RockVoucher("VOLCANIC_ROCK_VOUCHER_10000", 200, state, True, 10000, cur_tte, product_instances["VOLCANIC_ROCK"], 20, 1000, 20, 20, 20, 10)
+            product_instances["VOLCANIC_ROCK_VOUCHER_10250"] = RockVoucher("VOLCANIC_ROCK_VOUCHER_10250", 200, state, True, 10250, cur_tte, product_instances["VOLCANIC_ROCK"], 20, 1000, 20, 20, 20, 10)
+            product_instances["VOLCANIC_ROCK_VOUCHER_10500"] = RockVoucher("VOLCANIC_ROCK_VOUCHER_10500", 200, state, True, 10500, cur_tte, product_instances["VOLCANIC_ROCK"], 20, 1000, 20, 20, 20, 10)
 
             # turn on the trading unit; the products have been populated!
             Trader.turned_on = True
@@ -961,7 +961,7 @@ class Trader:
         # after ALL instantiating or resetting is done, then execute strategies
 
         # first, handle arbitrages
-        product_instances["PB1_WITH_PB2"].strategy()
+        # product_instances["PB1_WITH_PB2"].strategy()
 
         # second, handle non-arbitrages
         conversions = 0
