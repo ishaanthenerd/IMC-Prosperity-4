@@ -8,14 +8,10 @@ import numpy as np
 from math import floor, ceil, log, sqrt, exp
 from statistics import NormalDist
 
-'''
-NOTE: This file will contain all products except Macarons from Prosperity 3. 
-'''
-
 class Logger:
     def __init__(self) -> None:
         self.logs = ""
-        self.max_log_length = 10000 # was 3750
+        self.max_log_length = 3750
 
     def print(self, *objects: Any, sep: str = " ", end: str = "\n") -> None:
         self.logs += sep.join(map(str, objects)) + end
@@ -263,22 +259,24 @@ class Product():
     # methods to buy / sell everything
     def full_buy(self, quantity: int):
         q = quantity
-        for price, volume in self.order_depth.sell_orders.items():
-            if volume < 0:
-                buy_vol = min(q, min(self.limit_buy_orders(), -volume))
-                self.buy(price, buy_vol)
-                q -= buy_vol
-                if q <= 0 or self.limit_buy_orders() <= 0:
-                    break
+        for price in sorted(self.order_depth.sell_orders.keys()):
+            if q == 0:
+                break
+            available = -self.order_depth.sell_orders[price]
+            buy_quantity = min(self.max_buy_orders(), available)
+            if buy_quantity > 0:
+                self.buy(price, buy_quantity)
+                q -= buy_quantity
     def full_sell(self, quantity: int):
         q = quantity
-        for price, volume in self.order_depth.buy_orders.items():
-            if volume > 0:
-                sell_vol = min(q, min(self.limit_sell_orders(), volume))
-                self.sell(price, sell_vol)
-                q -= sell_vol
-                if q <= 0 or self.limit_sell_orders() <= 0:
-                    break
+        for price in sorted(self.order_depth.buy_orders.keys(), reverse = True):
+            if q == 0:
+                break
+            available = self.order_depth.buy_orders[price]
+            sell_quantity = min(q, available)
+            if sell_quantity > 0:
+                self.sell(price, sell_quantity)
+                q -= sell_quantity
     
     # cancel all orders, all / buy / sell
     def cancel_orders(self):
@@ -297,59 +295,63 @@ class Product():
     '''
     SECTION 3 - Strategies
     '''
-    # balance position back to zero using market participants' prices
-    def market_take(self, fair_val: float, edge: float = 0):
-        bid_val = fair_val - edge
-        ask_val = fair_val + edge
-
-        for bid_price, bid_vol in self.order_depth.buy_orders.items():
-            if bid_price > ask_val or (bid_price == ask_val and self.active_position() > 0): 
-                sell_vol = min(self.max_sell_orders(), bid_vol)
-                if bid_price == ask_val:
-                    sell_vol = min(sell_vol, self.active_position())
-                if sell_vol > 0:
-                    self.sell(bid_price, sell_vol)
-
-        for ask_price, ask_vol in self.order_depth.sell_orders.items():
-            ask_vol *= -1
-            if ask_price < bid_val or (ask_price == bid_val and self.active_position() < 0):
-                buy_vol = min(self.max_buy_orders(), ask_vol)
-                if ask_price == bid_val:
-                    buy_vol = min(buy_vol, -self.active_position())
-                if buy_vol > 0:
-                    self.buy(ask_price, buy_vol)
-
-    # places a bid / ask like normal
-    def market_make(
-        self,
-        buy_price: int,
-        sell_price: int
-    ):
-        self.buy(buy_price, self.max_buy_orders())
-        self.sell(sell_price, self.max_sell_orders())
     
-    # market-making under the condition of starting at [fv - edge, fv + edge] and expanding outwards
-    def mm_undercut(
+    def take(
         self,
         fair_val: int,
         edge: float = 0,
     ):
-        mm_buy = max([bid for bid in self.order_depth.buy_orders.keys() if bid < fair_val - edge], default=fair_val - edge - 1) + 1
-        mm_sell = min([ask for ask in self.order_depth.sell_orders.keys() if ask > fair_val + edge], default=fair_val + edge + 1) - 1
-        self.market_make(mm_buy, mm_sell)
+        for price in sorted(self.order_depth.sell_orders.keys()):
+            if price >= fair_val - edge:
+                break
+            available = -self.order_depth.sell_orders[price]
+            quantity = min(self.max_buy_orders(), available)
+            if quantity > 0:
+                self.buy(price, quantity)
+        
+        for price in sorted(self.order_depth.buy_orders.keys(), reverse = True):
+            if price <= fair_val + edge:
+                break
+            available = self.order_depth.buy_orders[price]
+            quantity = min(self.max_sell_orders(), available)
+            if quantity > 0:
+                self.sell(price, quantity)
 
-    # same as mm_undercut but also try to move position towards zero if position != 0
-    def mm_undercut_balanced(
+    def clear(
+        self,
+        fair_val: int,
+    ):
+        if self.active_position() > 0:
+            self.sell(fair_val, self.active_position())
+        elif self.active_position() < 0:
+            self.buy(fair_val, -self.active_position())
+
+    def make(
+        self,
+        fair_val: int,
+        edge: float,
+    ):
+        self.buy(fair_val - edge, self.max_buy_orders())
+        self.sell(fair_val + edge, self.max_sell_orders())
+
+    def make_balanced(
+        self,
+        fair_val: int,
+        edge: float,
+    ):
+        if not (self.active_position() > 0 and fair_val - edge >= self.best_bid()):
+            self.buy(fair_val - edge, self.max_buy_orders())
+        if not (self.active_position() < 0 and fair_val + edge <= self.best_ask()):
+            self.sell(fair_val + edge, self.max_sell_orders())
+
+    def take_clear_make(
         self,
         fair_val: int,
         edge: float = 0,
     ):
-        mm_buy = max([bid for bid in self.order_depth.buy_orders.keys() if bid < fair_val - edge], default = fair_val - edge - 1) + 1
-        mm_sell = min([ask for ask in self.order_depth.sell_orders.keys() if ask > fair_val + edge], default = fair_val + edge + 1) - 1
-        if not (self.active_position() > 0 and mm_buy >= self.best_bid()):
-            self.buy(mm_buy, self.max_buy_orders())
-        if not (self.active_position() < 0 and mm_sell <= self.best_ask()):
-            self.sell(mm_sell, self.max_sell_orders())
+        self.take(fair_val, edge)
+        self.clear(fair_val)
+        self.make(fair_val, edge)
     
     '''
     SECTION 4 - Non-Implemented Strategies (runtime polymorphism)
@@ -540,7 +542,7 @@ class BlackScholes:
     def moneyness(spot, strike, time_to_expiry):
         return log(spot / strike) / sqrt(time_to_expiry)
 
-class Option(Product):
+class MeanRevOption(Product):
     def __init__(self, symbol: str, limit: int, state: TradingState, 
                  is_call: bool, strike: int, tte: float, underlying: Product,
                  underlying_z_th: float, underlying_window: int, 
@@ -559,8 +561,6 @@ class Option(Product):
     
     def update_tte(self, new_tte: float):
         self.tte = new_tte
-        self.underlying_bought = 0
-        self.underlying_sold = 0
 
     def fair_val(self):
         if len(self.ivs.premiums) != self.ivs.window:
@@ -589,7 +589,13 @@ class Option(Product):
         
         # cap ivs getting added (there's something causing it to spike like CRAZY)
         if not (0.01 <= option_iv <= 0.99):
-            option_iv = max(self.ivs.mean() - 2 * self.ivs.std(), min(option_iv, self.ivs.mean() + 2 * self.ivs.std()))
+            if len(self.ivs.premiums) != self.ivs.window:
+                return
+            option_iv = max(self.ivs.mean() - 2 * self.ivs.std(), 
+                            min(option_iv, 
+                                self.ivs.mean() + 2 * self.ivs.std(),
+                            )
+                        )
         
         self.underlying_prices.add(underlying_mid)
         self.ivs.add(round(option_iv, 6))
@@ -599,15 +605,6 @@ class Option(Product):
             logger.print("NOT bingqilin")
             return
 
-        # DEBUG - check for bad IVs
-        # # Define reasonable IV bounds
-        # MIN_IV = 0.0       # IV can't be negative
-        # MAX_IV = 0.5       # Adjust depending on market
-        # # Check the array
-        # bad_indices = np.where((self.ivs.premiums < MIN_IV) | (self.ivs.premiums > MAX_IV))[0]
-        # # Assert that there are no bad values
-        # assert len(bad_indices) == 0, f"Found {len(bad_indices)} invalid IVs at indices {bad_indices}, values: {self.ivs.premiums[bad_indices]}"
-
         # make prices; round to 6 places for readability
         avg_vol = self.ivs.mean()
         std_vol = self.ivs.std()
@@ -616,69 +613,28 @@ class Option(Product):
         else:
             cur_prices = [round(BlackScholes.black_scholes_put(underlying_mid, self.strike, self.tte, avg_vol + i * std_vol), 6) for i in range(-1, 2)]
         
-        # market make on it
-        fair_value = cur_prices[1]
-        bid = int(math.floor(fair_value + 0.01))
-        ask = int(math.ceil(fair_value - 0.01))
-
-        # DEBUG - check for valid iv values
-        # logger.print("iv:", round(option_iv, 6))
-        # logger.print("avg_iv:", round(avg_vol, 6))
-        # logger.print("fair_value:", round(fair_value, 6))
-        # logger.print("market:", bid, "@", ask)
-        # if not math.isnan(self.best_ask()) and self.best_ask() < bid:
-        #     logger.print("we're buying")
-        # if not math.isnan(self.best_bid()) and ask < self.best_bid():
-        #     logger.print("we're selling")
-
-        # if not volatile enough, just leave the market you CLOWN
-        if (cur_prices[2] - cur_prices[0]) < 1.0:
+        # leave if the market is not volatile enough
+        if cur_prices[2] - cur_prices[0] < 1.0:
             return
         
-        # keep track of information
-        best_bid = self.best_bid()
-        best_ask = self.best_ask()
-        if math.isnan(best_bid) or math.isnan(best_ask):
-            logger.print("missing best bid/ask")
+        # we market making ts
+        fair_value = cur_prices[1]
+        if math.isnan(fair_value):
             return
-        bid_size = self.limit_buy_orders()
-        ask_size = self.limit_sell_orders()
-        max_spread = max(1, math.floor(fair_value * 0.03))
+        bid = int(math.floor(fair_value - 0.01))
+        ask = int(math.ceil(fair_value + 0.01))
         old_position = self.active_position()
 
-        # check if we are crossing markets with best_ask
-        for market_ask, market_amount in self.order_depth.sell_orders.items():
-            if bid > market_ask:
-                # eat their market then take it over
-                eat_order_size = abs(min(bid_size, abs(market_amount)))
-                self.buy(market_ask, eat_order_size)
-                    
-                # place bid above best bid
-                if best_bid is not None:
-                    bid = best_bid + 1
-                else:
-                    bid = int(math.floor(fair_value - max_spread))
+        # DEBUG
+        # logger.print("cur_prices:", cur_prices)
+        # logger.print("cur_mid:", -1 if math.isnan(self.mid_price_using_best()) else self.mid_price_using_best())
+        # if not math.isnan(self.mid_price_using_best()) and abs(self.mid_price_using_best() - fair_value) > 5:
+        #     logger.print("THE BAD IS HERE")
 
-                # place ask at maximum dist from fair value
-                ask = int(math.ceil(max(fair_value + max_spread, ask)))
-                                
-        # check if we are crossing with best_bid
-        for market_bid, market_amount in self.order_depth.buy_orders.items():
-            if ask < market_bid:
-                # eat their market then take it over
-                eat_order_size = abs(min(ask_size, abs(market_amount)))
-                self.sell(market_bid, eat_order_size)
-                
-                # place ask below best ask
-                if best_ask is not None: 
-                    ask = best_ask - 1
-                else:
-                    ask = int(math.ceil(ask + max_spread))
-                
-                # place bid at maximum dist from fair value
-                bid = int(math.floor(max(fair_value - max_spread, bid)))
+        # phase 1 - take
+        self.take(fair_value)
         
-        # rebalance position
+        # phase 2 - clear
         bid_size = self.limit_buy_orders()
         ask_size = self.limit_sell_orders()
         if bid == ask:
@@ -690,86 +646,53 @@ class Option(Product):
             self.buy(bid, bid_size)
             self.sell(ask, ask_size)
 
+        # phase 3 (make) is skipped b/c it does nothing...
+
         # delta hedge
         position_change = self.active_position() - old_position
         avg_delta = self.deltas.mean()
         if self.is_call:
             if position_change > 0:
-                self.underlying.sell(self.underlying.mid_price_using_best(), int(ceil(position_change * avg_delta)))
+                self.full_sell(int(ceil(position_change * avg_delta)))
             elif position_change < 0:
-                self.underlying.buy(self.underlying.mid_price_using_best(), int(floor(-position_change * avg_delta)))
+                self.full_buy(int(floor(-position_change * avg_delta)))
         else:
             if position_change > 0:
-                self.underlying.buy(self.underlying.mid_price_using_best(), int(ceil(position_change * -avg_delta)))
+                self.full_buy(int(ceil(position_change * -avg_delta)))
             elif position_change < 0:
-                self.underlying.sell(self.underlying.mid_price_using_best(), int(floor(-position_change * -avg_delta)))
+                self.full_sell(int(floor(-position_change * -avg_delta)))
+
+class IVScalperOption(Product):
+    def __init__(self, symbol: str, limit: int, state: TradingState, 
+                 is_call: bool, strike: int, tte: float, underlying: Product):
+        super().__init__(symbol, limit, state)
+        self.is_call = is_call
+        self.strike = strike
+        self.tte = tte # time to expiry in years
+        self.underlying = underlying
+
+        self.a = 0.12828680415426924
+        self.b = 0.006339066632356327
+        self.c = 0.2723988924431878
+    
+    def update_tte(self, new_tte: float):
+        self.tte = new_tte
+
+    def implied_volatility(self):
+        moneyness = BlackScholes.moneyness(self.underlying.mid_price_using_best(), self.strike, self.tte)
+        return self.a * moneyness ** 2 + self.b * moneyness + self.c
+
+    def fair_val(self):
+        return BlackScholes.black_scholes_call(self.underlying.mid_price_using_best(), self.strike, self.tte, self.implied_volatility())
+    
+    def strategy(self):
+        self.make(self.fair_val(), 0.1)
 
 '''
 PRODUCT CLASSES
 '''
 
-class Resin(Product):
-    def __init__(self, symbol: str, limit: int, state: TradingState):
-        super().__init__(symbol, limit, state)
-
-    def fair_val(self):
-        return 10000
-    
-    def strategy(self):
-        self.market_take(self.fair_val())
-        self.mm_undercut(self.fair_val(), 8)
-
-class Kelp(Product):
-    def __init__(self, symbol: str, limit: int, state: TradingState):
-        super().__init__(symbol, limit, state)
-
-    def fair_val(self):
-        return self.mid_price_using_best()
-    
-    def strategy(self):
-        self.market_take(self.fair_val())
-        self.mm_undercut(self.fair_val(), 2)
-
-class SquidInk(Product):
-    def __init__(self, product, limit, state):
-        super().__init__(product, limit, state)
-        self.recent_prices = RollingZ(20, 10)
-    
-    def fair_val(self):
-        return self.mid_price_using_best()
-
-    def strategy(self):
-        # add data
-        self.recent_prices.add(self.fair_val())
-
-        # detect Olivia's signal
-        market_trades = self.state.market_trades.get(self.product, [])
-        market_trades_olivia = [i for i in market_trades if (i.buyer == "Olivia" or i.seller == "Olivia")]
-        if len(market_trades_olivia) > 0 and abs(market_trades_olivia[-1].timestamp - self.timestamp) <= 100:
-            # DEBUG
-            cur_trade_olivia = market_trades_olivia[-1]
-            logger.print("found")
-            logger.print("olivia price:", cur_trade_olivia.price)
-            logger.print("olivia's side:", ("buy" if cur_trade_olivia.buyer == "Olivia" else "sell"))
-            
-            # actual logic - time to go full monke
-            # (analysis reveals that these are 21 ~ 28; in general it's rare to be above 40)
-            if cur_trade_olivia.buyer == "Olivia":
-                self.full_buy(self.orderbook_sell_size())
-                logger.print("sell orderbook size =", self.orderbook_sell_size())
-            else:
-                self.full_sell(self.orderbook_buy_size())
-                logger.print("buy orderbook size =", self.orderbook_buy_size())
-            return
-
-        # yolo. (but only on huge price change)
-        if len(self.recent_prices.premiums) >= 2 and self.recent_prices.std() > 20:
-            if self.fair_val() > self.recent_prices.premiums[-2] + 10:
-                self.full_sell(self.orderbook_buy_size())
-            elif self.fair_val() < self.recent_prices.premiums[-2] - 10:
-                self.full_buy(self.orderbook_sell_size())
-
-class Croissant(Product):
+class VelvetFruitExtract(Product):
     def __init__(self, product, limit, state):
         super().__init__(product, limit, state)
     
@@ -777,62 +700,12 @@ class Croissant(Product):
         return self.mid_price_using_best()
     
     def strategy(self):
-        pass # self.mm_undercut_balanced(self.fair_val(), 1)
+        self.take_clear_make(self.fair_val(), 3)
 
-class Jam(Product):
-    def __init__(self, product, limit, state):
-        super().__init__(product, limit, state)
-    
-    def fair_val(self):
-        return self.mid_price_using_best()
-    
-    def strategy(self):
-        pass # self.mm_undercut_balanced(self.fair_val(), 1)
-
-class Djembe(Product):
-    def __init__(self, product, limit, state):
-        super().__init__(product, limit, state)
-    
-    def fair_val(self):
-        return self.mid_price_using_best()
-    
-    def strategy(self):
-        pass # self.mm_undercut_balanced(self.fair_val(), 1)
-
-class Basket1(Product):
-    def __init__(self, product, limit, state):
-        super().__init__(product, limit, state)
-    
-    def fair_val(self):
-        return self.mid_price_using_best()
-    
-    def strategy(self):
-        pass
-
-class Basket2(Product):
-    def __init__(self, product, limit, state):
-        super().__init__(product, limit, state)
-    
-    def fair_val(self):
-        return self.mid_price_using_best()
-    
-    def strategy(self):
-        pass
-
-class Rock(Product):
-    def __init__(self, product, limit, state):
-        super().__init__(product, limit, state)
-    
-    def fair_val(self):
-        return self.mid_price_using_best()
-    
-    def strategy(self):
-        self.market_take(self.fair_val())
-        self.mm_undercut_balanced(self.fair_val(), 5)
-
-class RockVoucher(Option):
-    def __init__(self, symbol, limit, state, is_call, strike, tte, underlying, underlying_z_th, underlying_window, iv_z_th, iv_window, delta_z_th, delta_window):
-        super().__init__(symbol, limit, state, is_call, strike, tte, underlying, underlying_z_th, underlying_window, iv_z_th, iv_window, delta_z_th, delta_window)
+class VEV(IVScalperOption):
+    def __init__(self, symbol: str, limit: int, state: TradingState, 
+                 is_call: bool, strike: int, tte: float, underlying: Product):
+        super().__init__(symbol, limit, state, is_call, strike, tte, underlying)
     
     def fair_val(self):
         return super().fair_val()
@@ -840,45 +713,26 @@ class RockVoucher(Option):
     def strategy(self):
         super().strategy()
 
-class Macaron(Product):
+class Hydrogel(Product):
     def __init__(self, product, limit, state):
         super().__init__(product, limit, state)
-        self.conversions = 0
     
     def fair_val(self):
-        pass
+        return self.mid_price_using_best()
     
     def strategy(self):
-        # reset conversions amount
-        self.conversions = 0
-
-        # convert anything by buying local
-        if self.active_position() < 0:
-            self.conversions = min(-self.active_position(), 10) # 10 at a time
-
-        # get observation info
-        obs = self.state.observations.conversionObservations.get("MAGNIFICENT_MACARONS", None)
-        if obs is None:
-            return
-        island_ask = obs.askPrice
-        transport_fee = obs.transportFees
-        import_tariff = obs.importTariff
-
-        # get local trading price and arbitrage
-        ask_val = math.ceil(island_ask + transport_fee + import_tariff)
-        for bid_price, bid_vol in self.order_depth.buy_orders.items():
-            if bid_price > ask_val or (bid_price == ask_val and self.active_position() > 0): 
-                sell_vol = min(self.max_sell_orders(), bid_vol)
-                if bid_price == ask_val:
-                    sell_vol = min(sell_vol, self.active_position())
-                if sell_vol > 0:
-                    self.sell(bid_price, sell_vol)
+        fair_val = self.mid_price_using_best()
+        making_th = 8
+        if (not math.isnan(self.best_bid())) and (not math.isnan(self.best_ask())):
+            bid = min(fair_val - making_th, self.best_bid() + 1)
+            ask = max(fair_val + making_th, self.best_ask() - 1)
+            self.make_balanced((bid + ask) / 2, (ask - bid) / 2)
 
 '''
 TRADING EXECUTION
 '''
 
-product_instances = {}
+product_instances = []
 
 class Trader:
     # indicates if product_instances has been filled
@@ -888,91 +742,38 @@ class Trader:
     def run(self, state: TradingState):
         result = {}
         traderData = ""
-        # SET THIS CORRECTLY
         cur_day = 3
-        cur_tte = ((8 - cur_day) / 365) - (state.timestamp / 365e6)
+        cur_tte = ((8 - cur_day) / 365) - (state.timestamp / 365e6) # SET THIS!
 
         if not Trader.turned_on:
             # initiate the products / arbitrages
-            # NOTE: exclude Macarons, as there is no backtesting for conversions
-
-            # DAY 1
-            # product_instances["RAINFOREST_RESIN"] = Resin("RAINFOREST_RESIN", 50, state)
-            # product_instances["KELP"] = Kelp("KELP", 50, state)
-            # product_instances["SQUID_INK"] = SquidInk("SQUID_INK", 50, state)
-
-            # DAY 2
-            # product_instances["CROISSANTS"] = Croissant("CROISSANTS", 250, state)
-            # product_instances["JAMS"] = Jam("JAMS", 350, state)
-            # product_instances["DJEMBES"] = Djembe("DJEMBES", 60, state)
-            # product_instances["PICNIC_BASKET1"] = Basket1("PICNIC_BASKET1", 60, state)
-            # product_instances["PICNIC_BASKET2"] = Basket2("PICNIC_BASKET2", 100, state)
-            
-            # product_instances["PB1_WITH_PB2"] = Arbitrage(
-            #     "PB1_WITH_PB2", 1000000000, state,
-            #     [product_instances["PICNIC_BASKET1"]],
-            #     [1],
-            #     [product_instances["PICNIC_BASKET2"], 
-            #      product_instances["CROISSANTS"], 
-            #      product_instances["JAMS"], 
-            #      product_instances["DJEMBES"]],
-            #     [1, 2, 1, 1],
-            #     3.6, 100
-            # )
-
-            # OLD CODE
-            # product_instances["ARBITRAGE_1"] = Arbitrage(
-            #     "ARBITRAGE_1", 1000000000, state,
-            #     [product_instances["PICNIC_BASKET1"]], 
-            #     [1],
-            #     [product_instances["CROISSANTS"], product_instances["JAMS"], product_instances["DJEMBES"]], 
-            #     [6, 3, 1],
-            #     1, 30, 48, 85
-            # )
-            # product_instances["ARBITRAGE_2"] = Arbitrage(
-            #     "ARBITRAGE_2", 1000000000, state,
-            #     [product_instances["PICNIC_BASKET2"]], 
-            #     [1],
-            #     [product_instances["CROISSANTS"], product_instances["JAMS"]],
-            #     [4, 2],
-            #     1.5, 30, 30, 60
-            # )
-
-            # DAY 3
-            product_instances["VOLCANIC_ROCK"] = Rock("VOLCANIC_ROCK", 400, state)
-            product_instances["VOLCANIC_ROCK_VOUCHER_9500"]  = RockVoucher("VOLCANIC_ROCK_VOUCHER_9500",  200, state, True, 9500,  cur_tte, product_instances["VOLCANIC_ROCK"], 20, 1000, 20, 20, 20, 10)
-            product_instances["VOLCANIC_ROCK_VOUCHER_9750"]  = RockVoucher("VOLCANIC_ROCK_VOUCHER_9750",  200, state, True, 9750,  cur_tte, product_instances["VOLCANIC_ROCK"], 20, 1000, 20, 20, 20, 10)
-            product_instances["VOLCANIC_ROCK_VOUCHER_10000"] = RockVoucher("VOLCANIC_ROCK_VOUCHER_10000", 200, state, True, 10000, cur_tte, product_instances["VOLCANIC_ROCK"], 20, 1000, 20, 20, 20, 10)
-            product_instances["VOLCANIC_ROCK_VOUCHER_10250"] = RockVoucher("VOLCANIC_ROCK_VOUCHER_10250", 200, state, True, 10250, cur_tte, product_instances["VOLCANIC_ROCK"], 20, 1000, 20, 20, 20, 10)
-            product_instances["VOLCANIC_ROCK_VOUCHER_10500"] = RockVoucher("VOLCANIC_ROCK_VOUCHER_10500", 200, state, True, 10500, cur_tte, product_instances["VOLCANIC_ROCK"], 20, 1000, 20, 20, 20, 10)
+            product_instances.append(VelvetFruitExtract("VELVETFRUIT_EXTRACT", 200, state))
+            for st in [4000, 4500, 5000, 5100, 5200, 5300, 5400, 5500, 6000, 6500]:
+                product_instances.append(VEV(
+                    "VEV_" + str(st), 300, state, True,
+                    st, cur_tte, product_instances[0]
+                ))
+            product_instances.append(Hydrogel("HYDROGEL_PACK", 200, state))
 
             # turn on the trading unit; the products have been populated!
             Trader.turned_on = True
         else:
             # reset ALL the states (can help if multiple product states are entangled)
-            for product, instance in product_instances.items():
+            for instance in product_instances:
                 instance.reset_state(state)
 
         # update tte for options
-        for product, instance in product_instances.items():
-            if isinstance(instance, Option):
+        for instance in product_instances:
+            if isinstance(instance, MeanRevOption) or isinstance(instance, IVScalperOption):
                 instance.update_tte(cur_tte)
 
         # after ALL instantiating or resetting is done, then execute strategies
-
-        # first, handle arbitrages
-        # product_instances["PB1_WITH_PB2"].strategy()
-
-        # second, handle non-arbitrages
-        conversions = 0
-        for product, instance in product_instances.items():
-            if isinstance(instance, Product) and not isinstance(instance, Arbitrage):
+        for instance in product_instances:
+            if isinstance(instance, Product):
                 instance.strategy()
-                result[product] = instance.orders
-                logger.print("Orders for ", product, ": ", instance.orders)
-                # NOTE: skip conversions for backtesting
-                # if isinstance(instance, Macaron):
-                #     conversions = instance.conversions
-        
+                result[instance.product] = instance.orders
+                logger.print("Orders for ", instance.product, ": ", instance.orders)
+
+        conversions = 0
         logger.flush(state, result, conversions, traderData)
         return result, conversions, traderData

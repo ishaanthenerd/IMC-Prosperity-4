@@ -419,9 +419,10 @@ class AshCoatedOsmium(Product):
             return
 
         # this strat makes ~18k
-        making_th = 8 # pick this empirically
-        bid = min(self.mid_price_using_best() - making_th, self.best_bid() + 1)
-        ask = max(self.mid_price_using_best() + making_th, self.best_ask() - 1)
+        fair_val = self.mid_price_using_best()
+        making_th = 8
+        bid = min(fair_val - making_th, self.best_bid() + 1)
+        ask = max(fair_val + making_th, self.best_ask() - 1)
         self.make((bid + ask) / 2, (ask - bid) / 2)
         self.take_clear_make(self.fixed_mean, 2 * self.fixed_std)
 
@@ -456,8 +457,8 @@ class Trader:
 
         if not Trader.turned_on:
             # initiate the products / arbitrages
-            # product_instances.append(AshCoatedOsmium("ASH_COATED_OSMIUM", 80, state, 10000, 5))
-            product_instances.append(IntarianPepperRoot("INTARIAN_PEPPER_ROOT", 80, state))
+            product_instances.append(AshCoatedOsmium("ASH_COATED_OSMIUM", 80, state, 10000, 5))
+            # product_instances.append(IntarianPepperRoot("INTARIAN_PEPPER_ROOT", 80, state))
 
             # turn on the trading unit; the products have been populated!
             Trader.turned_on = True
