@@ -542,7 +542,7 @@ class BlackScholes:
     def moneyness(spot, strike, time_to_expiry):
         return log(spot / strike) / sqrt(time_to_expiry)
 
-class Option(Product):
+class MeanRevOption(Product):
     def __init__(self, symbol: str, limit: int, state: TradingState, 
                  is_call: bool, strike: int, tte: float, underlying: Product,
                  underlying_z_th: float, underlying_window: int, 
@@ -561,8 +561,6 @@ class Option(Product):
     
     def update_tte(self, new_tte: float):
         self.tte = new_tte
-        self.underlying_bought = 0
-        self.underlying_sold = 0
 
     def fair_val(self):
         if len(self.ivs.premiums) != self.ivs.window:
@@ -615,6 +613,10 @@ class Option(Product):
         else:
             cur_prices = [round(BlackScholes.black_scholes_put(underlying_mid, self.strike, self.tte, avg_vol + i * std_vol), 6) for i in range(-1, 2)]
         
+        # leave if the market is not volatile enough
+        if cur_prices[2] - cur_prices[0] < 1.0:
+            return
+        
         # we market making ts
         fair_value = cur_prices[1]
         if math.isnan(fair_value):
@@ -660,6 +662,32 @@ class Option(Product):
             elif position_change < 0:
                 self.full_sell(int(floor(-position_change * -avg_delta)))
 
+class IVScalperOption(Product):
+    def __init__(self, symbol: str, limit: int, state: TradingState, 
+                 is_call: bool, strike: int, tte: float, underlying: Product):
+        super().__init__(symbol, limit, state)
+        self.is_call = is_call
+        self.strike = strike
+        self.tte = tte # time to expiry in years
+        self.underlying = underlying
+
+        self.a = 0.12828680415426924
+        self.b = 0.006339066632356327
+        self.c = 0.2723988924431878
+    
+    def update_tte(self, new_tte: float):
+        self.tte = new_tte
+
+    def implied_volatility(self):
+        moneyness = BlackScholes.moneyness(self.underlying.mid_price_using_best(), self.strike, self.tte)
+        return self.a * moneyness ** 2 + self.b * moneyness + self.c
+
+    def fair_val(self):
+        return BlackScholes.black_scholes_call(self.underlying.mid_price_using_best(), self.strike, self.tte, self.implied_volatility())
+    
+    def strategy(self):
+        self.make(self.fair_val(), 0.1)
+
 '''
 PRODUCT CLASSES
 '''
@@ -674,9 +702,10 @@ class VelvetFruitExtract(Product):
     def strategy(self):
         self.take_clear_make(self.fair_val(), 3)
 
-class VEV(Option):
-    def __init__(self, symbol, limit, state, is_call, strike, tte, underlying, underlying_z_th, underlying_window, iv_z_th, iv_window, delta_z_th, delta_window):
-        super().__init__(symbol, limit, state, is_call, strike, tte, underlying, underlying_z_th, underlying_window, iv_z_th, iv_window, delta_z_th, delta_window)
+class VEV(IVScalperOption):
+    def __init__(self, symbol: str, limit: int, state: TradingState, 
+                 is_call: bool, strike: int, tte: float, underlying: Product):
+        super().__init__(symbol, limit, state, is_call, strike, tte, underlying)
     
     def fair_val(self):
         return super().fair_val()
@@ -722,10 +751,7 @@ class Trader:
             for st in [4000, 4500, 5000, 5100, 5200, 5300, 5400, 5500, 6000, 6500]:
                 product_instances.append(VEV(
                     "VEV_" + str(st), 300, state, True,
-                    st, cur_tte, product_instances[0],
-                    20, 1000,
-                    20, 20,
-                    20, 20
+                    st, cur_tte, product_instances[0]
                 ))
             product_instances.append(Hydrogel("HYDROGEL_PACK", 200, state))
 
@@ -738,7 +764,7 @@ class Trader:
 
         # update tte for options
         for instance in product_instances:
-            if isinstance(instance, Option):
+            if isinstance(instance, MeanRevOption) or isinstance(instance, IVScalperOption):
                 instance.update_tte(cur_tte)
 
         # after ALL instantiating or resetting is done, then execute strategies
