@@ -664,13 +664,13 @@ class MeanRevOption(Product):
 
 class IVScalperOption(Product):
     def __init__(self, symbol: str, limit: int, state: TradingState, 
-                 is_call: bool, strike: int, tte: float, underlying: Product, z_th: float):
+                 is_call: bool, strike: int, tte: float, underlying: Product):
         super().__init__(symbol, limit, state)
         self.is_call = is_call
         self.strike = strike
         self.tte = tte # time to expiry in years
         self.underlying = underlying
-        self.theos = RollingZ(z_th, 1000)
+        self.theos = RollingZ(1, 1000)
 
         # with filtering bottom lines
         self.a = 0.1287392569048691
@@ -721,8 +721,8 @@ class VelvetFruitExtract(Product):
 
 class VEV(IVScalperOption):
     def __init__(self, symbol: str, limit: int, state: TradingState, 
-                 is_call: bool, strike: int, tte: float, underlying: Product, z_th: float):
-        super().__init__(symbol, limit, state, is_call, strike, tte, underlying, z_th)
+                 is_call: bool, strike: int, tte: float, underlying: Product):
+        super().__init__(symbol, limit, state, is_call, strike, tte, underlying)
     
     def fair_val(self):
         return super().fair_val()
@@ -740,10 +740,10 @@ class Hydrogel(Product):
     def strategy(self):
         fair_val = self.mid_price_using_best()
         making_th = 8
-        bid = min(fair_val - making_th, self.best_bid() + 1)
-        ask = max(fair_val + making_th, self.best_ask() - 1)
-        self.make((bid + ask) / 2, (ask - bid) / 2)
-        self.take_clear_make(9991, 25)
+        if (not math.isnan(self.best_bid())) and (not math.isnan(self.best_ask())):
+            bid = min(fair_val - making_th, self.best_bid() + 1)
+            ask = max(fair_val + making_th, self.best_ask() - 1)
+            self.make_balanced((bid + ask) / 2, (ask - bid) / 2)
 
 '''
 TRADING EXECUTION
@@ -765,24 +765,13 @@ class Trader:
         if not Trader.turned_on:
             # initiate the products / arbitrages
             product_instances.append(VelvetFruitExtract("VELVETFRUIT_EXTRACT", 200, state))
-
-            # we're not trading 5200 and 5300; build out the z_th
-            strike_to_z = {
-                4000: 1,
-                4500: 1,
-                5000: 1.5,
-                5100: 3,
-                5400: 3,
-                5500: 3,
-                6000: 1,
-                6500: 1
-            }
+            # we're not trading 5200 and 5300
             for st in [4000, 4500, 5000, 5100, 5400, 5500, 6000, 6500]:
                 product_instances.append(VEV(
                     "VEV_" + str(st), 300, state, True,
-                    st, cur_tte, product_instances[0], strike_to_z[st]
+                    st, cur_tte, product_instances[0]
                 ))
-            product_instances.append(Hydrogel("HYDROGEL_PACK", 200, state))
+            # product_instances.append(Hydrogel("HYDROGEL_PACK", 200, state))
 
             # turn on the trading unit; the products have been populated!
             Trader.turned_on = True
