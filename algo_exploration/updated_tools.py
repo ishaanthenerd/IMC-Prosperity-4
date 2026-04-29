@@ -4,10 +4,6 @@ import string, json, math, statistics
 import matplotlib.pyplot as plt
 from io import StringIO
 
-'''
-DATA HANDLING
-'''
-
 # Load data from all three files; add info about best/worst bid/ask
 def extract_data(
         cur_round: int, 
@@ -121,6 +117,19 @@ def plot_orderbook_sell_size(
     plt.legend()
     plt.show()
 
+def plot_autocorrelation(
+        df: pd.DataFrame,
+        max_lag: int,
+    ):
+    
+    autocorrs = [auto_correlation(df, "timestamp", "mid_price", lag) for lag in range(1, max_lag + 1)]
+    plt.plot(list(range(1, max_lag + 1)), autocorrs)
+    # plt.xlabel("Lag")
+    # plt.ylabel("Autocorrelation")
+    # plt.title("Autocorrelation of mid_price")
+    # plt.grid(True)
+    # plt.show() --> uncomment if needed
+
 def extract_log_data(file_path: str) -> pd.DataFrame:
     with open(file_path, 'r') as f:
         log_data = json.loads(f.read().replace('\n', '\\n'))
@@ -151,22 +160,38 @@ def plot_pnl(df: pd.DataFrame, title: str = "Profit and Loss"):
     plt.legend()
     plt.show()
 
-def plot_autocorrelation(
+def plot_macd(
         df: pd.DataFrame,
-        max_lag: int,
     ):
-    
-    autocorrs = [auto_correlation(df, "timestamp", "mid_price", lag) for lag in range(1, max_lag + 1)]
-    plt.plot(list(range(1, max_lag + 1)), autocorrs)
-    # plt.xlabel("Lag")
-    # plt.ylabel("Autocorrelation")
-    # plt.title("Autocorrelation of mid_price")
-    # plt.grid(True)
-    # plt.show() --> uncomment if needed
+    prices = df["mid_price"].values
+    timestamps = df["timestamp"].values
+    ticks = timestamps / 100
+    ema_12 = ema(prices, 12)
+    ema_26 = ema(prices, 26)
+    macd = ema_12 - ema_26
+    signal = ema(macd, 9)
+    hist = macd - signal
 
-'''
-COMPUTATION
-'''
+    plt.figure(figsize=(12, 8))
+
+    # price plot
+    plt.subplot(2, 1, 1)
+    plt.plot(ticks, prices)
+    plt.title("Price")
+    plt.xlabel("Tick")
+    plt.ylabel("Mid Price")
+    # MACD plot
+    plt.subplot(2, 1, 2)
+    plt.plot(ticks, macd, label="MACD")
+    plt.plot(ticks, signal, label="Signal")
+    # histogram bars
+    plt.bar(ticks, hist, alpha=0.3)
+
+    plt.title("MACD")
+    plt.xlabel("Tick")
+    plt.legend()
+    plt.tight_layout()
+    plt.show()
 
 # Calculate auto_correlation between columns
 # If using timestamps, set column1 as "timestamp"
@@ -200,3 +225,13 @@ def calculate_adjusted_r_squared(x, y):
     if ss_tot == 0: return 0.0
     r_squared = 1 - (ss_res / ss_tot)
     return 1 - (1 - r_squared) * (n - 1) / (n - 2)
+
+def ema(series, window):
+    alpha = 2 / (window + 1)
+    ema_vals = np.zeros_like(series, dtype=float)
+    ema_vals[0] = series[0]
+
+    for i in range(1, len(series)):
+        ema_vals[i] = alpha * series[i] + (1 - alpha) * ema_vals[i - 1]
+
+    return ema_vals

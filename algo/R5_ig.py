@@ -144,17 +144,18 @@ statuses = [
     "buy and hold",
     "sell and hold",
     "fixed spread",
+    "rolling z"
 ]
 
 product_status = {
     'GALAXY_SOUNDS_BLACK_HOLES': "buy and hold",
     'GALAXY_SOUNDS_DARK_MATTER': "default",
-    'GALAXY_SOUNDS_PLANETARY_RINGS': "default",
-    'GALAXY_SOUNDS_SOLAR_FLAMES': "default",
-    'GALAXY_SOUNDS_SOLAR_WINDS': "default",
+    'GALAXY_SOUNDS_PLANETARY_RINGS': "untraded",
+    'GALAXY_SOUNDS_SOLAR_FLAMES': "untraded",
+    'GALAXY_SOUNDS_SOLAR_WINDS': "untraded",
     'MICROCHIP_CIRCLE': "default",
     'MICROCHIP_OVAL': "sell and hold",
-    'MICROCHIP_RECTANGLE': "default",
+    'MICROCHIP_RECTANGLE': "untraded",
     'MICROCHIP_SQUARE': "default",
     'MICROCHIP_TRIANGLE': "default",
     'OXYGEN_SHAKE_CHOCOLATE': "default",
@@ -162,23 +163,23 @@ product_status = {
     'OXYGEN_SHAKE_GARLIC': "buy and hold",
     'OXYGEN_SHAKE_MINT': "default",
     'OXYGEN_SHAKE_MORNING_BREATH': "default",
-    'PANEL_1X2': "fixed spread",
-    'PANEL_1X4': "default",
-    'PANEL_2X2': "default",
-    'PANEL_2X4': "default",
-    'PANEL_4X4': "default",
-    'PEBBLES_L': "default",
-    'PEBBLES_M': "default",
+    'PANEL_1X2': "rolling z",
+    'PANEL_1X4': "rolling z",
+    'PANEL_2X2': "rolling z",
+    'PANEL_2X4': "rolling z",
+    'PANEL_4X4': "rolling z",
+    'PEBBLES_L': "untraded",
+    'PEBBLES_M': "untraded",
     'PEBBLES_S': "default",
     'PEBBLES_XL': "default",
     'PEBBLES_XS': "sell and hold",
     'ROBOT_DISHES': "default",
     'ROBOT_IRONING': "default",
     'ROBOT_LAUNDRY': "default",
-    'ROBOT_MOPPING': "default",
+    'ROBOT_MOPPING': "untraded",
     'ROBOT_VACUUMING': "default",
     'SLEEP_POD_COTTON': "default",
-    'SLEEP_POD_LAMB_WOOL': "default",
+    'SLEEP_POD_LAMB_WOOL': "untraded",
     'SLEEP_POD_NYLON': "default",
     'SLEEP_POD_POLYESTER': "default",
     'SLEEP_POD_SUEDE': "default",
@@ -188,19 +189,27 @@ product_status = {
     'SNACKPACK_STRAWBERRY': "default",
     'SNACKPACK_VANILLA': "default",
     'TRANSLATOR_ASTRO_BLACK': "default",
-    'TRANSLATOR_ECLIPSE_CHARCOAL': "default",
+    'TRANSLATOR_ECLIPSE_CHARCOAL': "untraded",
     'TRANSLATOR_GRAPHITE_MIST': "default",
-    'TRANSLATOR_SPACE_GRAY': "default",
+    'TRANSLATOR_SPACE_GRAY': "untraded",
     'TRANSLATOR_VOID_BLUE': "default",
     'UV_VISOR_AMBER': "sell and hold",
-    'UV_VISOR_MAGENTA': "default",
+    'UV_VISOR_MAGENTA': "untraded",
     'UV_VISOR_ORANGE': "default",
     'UV_VISOR_RED': "default",
     'UV_VISOR_YELLOW': "default",
 }
 
 fixed_spreads = {
-    'PANEL_1X2': 7
+
+}
+
+rolling_z_info = {
+    'PANEL_1X2': [1,        100,    8922.7290,  589.9166], # adjust
+    'PANEL_1X4': [1,        100,    9397.5806,  834.0335],
+    'PANEL_2X2': [3,       1000,     math.nan,  math.nan],
+    'PANEL_2X4': [1,        100,   11265.3730,  627.1910], # adjust
+    'PANEL_4X4': [1.25,     100,    9878.7193,  457.0376],
 }
 
 class Product():
@@ -481,26 +490,26 @@ class SellAndHold(Product):
 class FixedSpread(Product):
     def __init__(self, product, limit, state):
         super().__init__(product, limit, state)
-        self.fixed_spread = fixed_spreads.get(product, 0)
 
     def fair_val(self):
         return self.mid_price_using_best()
     
     def strategy(self):
-        if self.fixed_spread <= 0:
-            raise Exception("ERROR: Fixed spread must be positive.")
         fair_val = self.mid_price_using_best()
-        making_th = self.fixed_spread
+        if math.isnan(fair_val):
+            return
+        making_th = fixed_spreads.get(self.product, 20)
         bid = min(fair_val - making_th, self.best_bid() + 1)
         ask = max(fair_val + making_th, self.best_ask() - 1)
         self.take_clear_make_balanced((bid + ask) / 2, (ask - bid) / 2)
 
 class RollingZ():
-    def __init__(self, z_th: float, window: int, fixed_mean: float = math.nan):
+    def __init__(self, z_th: float, window: int, fixed_mean: float = math.nan, fixed_std: float = math.nan):
         self.premiums = np.array([], dtype = float)
         self.z_th = z_th
         self.window = window
         self.fixed_mean = fixed_mean
+        self.fixed_std = fixed_std
 
     def add(self, new_val: float):
         self.premiums = np.append(self.premiums, new_val)
@@ -513,22 +522,18 @@ class RollingZ():
         return self.fixed_mean if not math.isnan(self.fixed_mean) else np.mean(self.premiums)
 
     def std(self):
-        return np.std(self.premiums)
+        return self.fixed_std if not math.isnan(self.fixed_std) else np.std(self.premiums)
     
     def most_recent(self):
         return self.premiums[-1]
 
     # 1 means buy, 0 means do nothing, -1 means sell (sign indicates position direction)
     def signal(self):
-        if np.std(self.premiums) == 0 or len(self.premiums) != self.window:
+        if len(self.premiums) != self.window or np.std(self.premiums) == 0:
             return 0
         
-        z_score = 0
-        if math.isnan(self.fixed_mean):
-            z_score = (self.premiums[-1] - np.mean(self.premiums)) / np.std(self.premiums)
-        else:
-            z_score = (self.premiums[-1] - self.fixed_mean) / np.std(self.premiums)
-
+        z_score = (self.most_recent() - self.mean()) / self.std()
+        logger.print(f"z_score = {z_score}")
         if z_score < -self.z_th:
             return 1
         elif z_score > self.z_th:
@@ -536,9 +541,26 @@ class RollingZ():
         else:
             return 0
 
-'''
-PRODUCT CLASSES
-'''
+class RollingZProduct(Product):
+    def __init__(self, product, limit, state, 
+                 z_th: float, window: float, mean: float = math.nan, std: float = math.nan):
+        super().__init__(product, limit, state)
+        self.rolling = RollingZ(z_th, window, mean, std)
+
+    def fair_val(self):
+        return self.mid_price_using_best()
+    
+    def strategy(self):
+        if math.isnan(self.fair_val()):
+            return
+        self.rolling.add(self.fair_val())
+        signal = self.rolling.signal()
+        if signal == -1:
+            quantity = min(self.max_sell_orders(), self.order_depth.buy_orders[self.best_bid()])
+            self.sell(self.best_bid(), quantity)
+        elif signal == 1:
+            quantity = min(self.max_buy_orders(), -self.order_depth.sell_orders[self.best_ask()])
+            self.buy(self.best_ask(), quantity)
 
 '''
 TRADING EXECUTION
@@ -568,6 +590,10 @@ class Trader:
                     product_instances.append(SellAndHold(product, 10, state))
                 elif status == "fixed spread":
                     product_instances.append(FixedSpread(product, 10, state))
+                elif status == "rolling z":
+                    rz_info = rolling_z_info[product]
+                    product_instances.append(RollingZProduct(product, 10, state,
+                                                             rz_info[0], rz_info[1], rz_info[2], rz_info[3]))
 
             # turn on the trading unit; the products have been populated!
             Trader.turned_on = True
