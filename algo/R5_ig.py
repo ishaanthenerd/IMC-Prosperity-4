@@ -139,9 +139,11 @@ DEFAULT CLASSES
 '''
 
 statuses = [
+    "untraded",
     "default",
     "buy and hold",
     "sell and hold",
+    "fixed spread",
 ]
 
 product_status = {
@@ -160,7 +162,7 @@ product_status = {
     'OXYGEN_SHAKE_GARLIC': "buy and hold",
     'OXYGEN_SHAKE_MINT': "default",
     'OXYGEN_SHAKE_MORNING_BREATH': "default",
-    'PANEL_1X2': "default",
+    'PANEL_1X2': "fixed spread",
     'PANEL_1X4': "default",
     'PANEL_2X2': "default",
     'PANEL_2X4': "default",
@@ -195,6 +197,10 @@ product_status = {
     'UV_VISOR_ORANGE': "default",
     'UV_VISOR_RED': "default",
     'UV_VISOR_YELLOW': "default",
+}
+
+fixed_spreads = {
+    'PANEL_1X2': 7
 }
 
 class Product():
@@ -472,6 +478,23 @@ class SellAndHold(Product):
             if self.active_position() < 0:
                 self.buy(self.best_ask(), -self.active_position())
 
+class FixedSpread(Product):
+    def __init__(self, product, limit, state):
+        super().__init__(product, limit, state)
+        self.fixed_spread = fixed_spreads.get(product, 0)
+
+    def fair_val(self):
+        return self.mid_price_using_best()
+    
+    def strategy(self):
+        if self.fixed_spread <= 0:
+            raise Exception("ERROR: Fixed spread must be positive.")
+        fair_val = self.mid_price_using_best()
+        making_th = self.fixed_spread
+        bid = min(fair_val - making_th, self.best_bid() + 1)
+        ask = max(fair_val + making_th, self.best_ask() - 1)
+        self.take_clear_make_balanced((bid + ask) / 2, (ask - bid) / 2)
+
 class RollingZ():
     def __init__(self, z_th: float, window: int, fixed_mean: float = math.nan):
         self.premiums = np.array([], dtype = float)
@@ -543,6 +566,8 @@ class Trader:
                     product_instances.append(BuyAndHold(product, 10, state))
                 elif status == "sell and hold":
                     product_instances.append(SellAndHold(product, 10, state))
+                elif status == "fixed spread":
+                    product_instances.append(FixedSpread(product, 10, state))
 
             # turn on the trading unit; the products have been populated!
             Trader.turned_on = True
