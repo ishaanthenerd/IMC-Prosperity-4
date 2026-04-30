@@ -143,13 +143,13 @@ statuses = [
     "default",
     "buy and hold",
     "sell and hold",
-    "fixed spread",
-    "rolling z"
+    "rolling z",
+    "linear fit" # used when seems like buy/hold or sell/hold but too volatile directly
 ]
 
 product_status = {
     'GALAXY_SOUNDS_BLACK_HOLES': "buy and hold",
-    'GALAXY_SOUNDS_DARK_MATTER': "default",
+    'GALAXY_SOUNDS_DARK_MATTER': "untraded",
     'GALAXY_SOUNDS_PLANETARY_RINGS': "untraded",
     'GALAXY_SOUNDS_SOLAR_FLAMES': "untraded",
     'GALAXY_SOUNDS_SOLAR_WINDS': "untraded",
@@ -159,57 +159,57 @@ product_status = {
     'MICROCHIP_SQUARE': "default",
     'MICROCHIP_TRIANGLE': "default",
     'OXYGEN_SHAKE_CHOCOLATE': "default",
-    'OXYGEN_SHAKE_EVENING_BREATH': "default",
+    'OXYGEN_SHAKE_EVENING_BREATH': "rolling z",
     'OXYGEN_SHAKE_GARLIC': "buy and hold",
-    'OXYGEN_SHAKE_MINT': "default",
-    'OXYGEN_SHAKE_MORNING_BREATH': "default",
-    'PANEL_1X2': "rolling z",
-    'PANEL_1X4': "rolling z",
-    'PANEL_2X2': "rolling z",
-    'PANEL_2X4': "rolling z",
-    'PANEL_4X4': "rolling z",
+    'OXYGEN_SHAKE_MINT': "untraded",
+    'OXYGEN_SHAKE_MORNING_BREATH': "untraded",
+    'PANEL_1X2': "untraded",
+    'PANEL_1X4': "untraded",
+    'PANEL_2X2': "untraded",
+    'PANEL_2X4': "buy and hold",
+    'PANEL_4X4': "untraded",
     'PEBBLES_L': "untraded",
     'PEBBLES_M': "untraded",
-    'PEBBLES_S': "default",
-    'PEBBLES_XL': "default",
+    'PEBBLES_S': "sell and hold",
+    'PEBBLES_XL': "linear fit",
     'PEBBLES_XS': "sell and hold",
-    'ROBOT_DISHES': "default",
-    'ROBOT_IRONING': "default",
-    'ROBOT_LAUNDRY': "default",
+    'ROBOT_DISHES': "buy and hold",
+    'ROBOT_IRONING': "linear fit",
+    'ROBOT_LAUNDRY': "untraded",
     'ROBOT_MOPPING': "untraded",
-    'ROBOT_VACUUMING': "default",
+    'ROBOT_VACUUMING': "untraded",
     'SLEEP_POD_COTTON': "default",
     'SLEEP_POD_LAMB_WOOL': "untraded",
     'SLEEP_POD_NYLON': "default",
     'SLEEP_POD_POLYESTER': "default",
     'SLEEP_POD_SUEDE': "default",
-    'SNACKPACK_CHOCOLATE': "default",
-    'SNACKPACK_PISTACHIO': "default",
-    'SNACKPACK_RASPBERRY': "default",
+    'SNACKPACK_CHOCOLATE': "untraded",
+    'SNACKPACK_PISTACHIO': "sell and hold",
+    'SNACKPACK_RASPBERRY': "untraded",
     'SNACKPACK_STRAWBERRY': "default",
-    'SNACKPACK_VANILLA': "default",
+    'SNACKPACK_VANILLA': "untraded",
     'TRANSLATOR_ASTRO_BLACK': "default",
     'TRANSLATOR_ECLIPSE_CHARCOAL': "untraded",
     'TRANSLATOR_GRAPHITE_MIST': "default",
     'TRANSLATOR_SPACE_GRAY': "untraded",
-    'TRANSLATOR_VOID_BLUE': "default",
+    'TRANSLATOR_VOID_BLUE': "untraded",
     'UV_VISOR_AMBER': "sell and hold",
     'UV_VISOR_MAGENTA': "untraded",
     'UV_VISOR_ORANGE': "default",
     'UV_VISOR_RED': "default",
-    'UV_VISOR_YELLOW': "default",
-}
-
-fixed_spreads = {
-
+    'UV_VISOR_YELLOW': "untraded",
 }
 
 rolling_z_info = {
-    'PANEL_1X2': [1,        100,    8922.7290,  589.9166], # adjust
-    'PANEL_1X4': [1,        100,    9397.5806,  834.0335],
-    'PANEL_2X2': [3,       1000,     math.nan,  math.nan],
-    'PANEL_2X4': [1,        100,   11265.3730,  627.1910], # adjust
-    'PANEL_4X4': [1.25,     100,    9878.7193,  457.0376],
+    'PANEL_1X4': [1, 100, 9397.5806, 834.0335],
+    'PANEL_2X2': [3, 1000, math.nan, math.nan],
+    'PANEL_4X4': [1.25, 100, 9878.7193, 457.0376],
+    'OXYGEN_SHAKE_EVENING_BREATH': [1, 100, 9367.4741, 220.9269]
+}
+
+linear_fit_info = {
+    'PEBBLES_XL':    [15776.07294625598,  0.001700265744201406],
+    'ROBOT_IRONING': [7532.773349686106, -0.000779171972254632],
 }
 
 class Product():
@@ -487,21 +487,17 @@ class SellAndHold(Product):
             if self.active_position() < 0:
                 self.buy(self.best_ask(), -self.active_position())
 
-class FixedSpread(Product):
-    def __init__(self, product, limit, state):
+class LinearFit(Product):
+    def __init__(self, product, limit, state, slope: float, intercept: float):
         super().__init__(product, limit, state)
+        self.slope = slope
+        self.intercept = intercept # assuming the *current* day start is timestamp of 0!!
 
     def fair_val(self):
-        return self.mid_price_using_best()
+        return self.timestamp * self.slope + self.intercept
     
     def strategy(self):
-        fair_val = self.mid_price_using_best()
-        if math.isnan(fair_val):
-            return
-        making_th = fixed_spreads.get(self.product, 20)
-        bid = min(fair_val - making_th, self.best_bid() + 1)
-        ask = max(fair_val + making_th, self.best_ask() - 1)
-        self.take_clear_make_balanced((bid + ask) / 2, (ask - bid) / 2)
+        self.take(self.fair_val())
 
 class RollingZ():
     def __init__(self, z_th: float, window: int, fixed_mean: float = math.nan, fixed_std: float = math.nan):
@@ -588,12 +584,14 @@ class Trader:
                     product_instances.append(BuyAndHold(product, 10, state))
                 elif status == "sell and hold":
                     product_instances.append(SellAndHold(product, 10, state))
-                elif status == "fixed spread":
-                    product_instances.append(FixedSpread(product, 10, state))
                 elif status == "rolling z":
                     rz_info = rolling_z_info[product]
                     product_instances.append(RollingZProduct(product, 10, state,
                                                              rz_info[0], rz_info[1], rz_info[2], rz_info[3]))
+                elif status == "linear fit":
+                    lf_info = linear_fit_info[product]
+                    product_instances.append(LinearFit(product, 10, state,
+                                                       lf_info[0], lf_info[1]))
 
             # turn on the trading unit; the products have been populated!
             Trader.turned_on = True

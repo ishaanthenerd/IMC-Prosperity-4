@@ -60,7 +60,7 @@ def plot_against_timestamp(
     plt.grid(True, alpha=0.3)
     plt.tight_layout()
     plt.legend()
-    plt.show()
+    # plt.show() --> uncomment if needed
 
 # Plot mid price + other prices against timestamp
 def plot_mid_price(
